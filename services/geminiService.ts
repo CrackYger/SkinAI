@@ -2,13 +2,21 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { SkinAnalysis, QuizData, WeatherData, ScannedProduct } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Helper to get AI instance safely
+const getAI = () => {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    throw new Error("API Key is not configured. Please check your environment settings.");
+  }
+  return new GoogleGenAI({ apiKey });
+};
 
 // Use Flash for faster responses in UI-blocking operations
 const FAST_MODEL = 'gemini-3-flash-preview';
 const IMAGE_MODEL = 'gemini-2.5-flash-image';
 
 export async function getRealtimeWeather(lat: number, lon: number): Promise<WeatherData> {
+  const ai = getAI();
   const response = await ai.models.generateContent({
     model: FAST_MODEL,
     contents: `Wie ist der aktuelle UV-Index, die Luftverschmutzung (AQI), die Temperatur und die Luftfeuchtigkeit an diesen Koordinaten: Latitude ${lat}, Longitude ${lon}? Gib nur die Werte als JSON zurück.`,
@@ -32,6 +40,7 @@ export async function getRealtimeWeather(lat: number, lon: number): Promise<Weat
 
 export async function generateProductImage(description: string): Promise<string> {
   try {
+    const ai = getAI();
     const response = await ai.models.generateContent({
       model: IMAGE_MODEL,
       contents: {
@@ -55,6 +64,7 @@ export async function generateProductImage(description: string): Promise<string>
 }
 
 export async function analyzeProduct(imageData: string, quiz: QuizData): Promise<ScannedProduct> {
+  const ai = getAI();
   const response = await ai.models.generateContent({
     model: FAST_MODEL,
     contents: {
@@ -93,6 +103,7 @@ export async function analyzeSkin(
   weather?: WeatherData,
   onProgress?: (msg: string) => void
 ): Promise<SkinAnalysis> {
+  const ai = getAI();
   if (onProgress) onProgress("Hautdaten werden verarbeitet...");
   
   const imageParts = Object.values(images).map(base64 => ({
@@ -149,7 +160,6 @@ export async function analyzeSkin(
   // Enrich images in parallel for better performance
   const enrich = async (steps: any[]) => {
     if (!steps || steps.length === 0) return [];
-    // Limit to 4 parallel generations to avoid quota issues
     return await Promise.all(steps.slice(0, 4).map(async s => ({
       ...s,
       imageUrl: await generateProductImage(s.product)
