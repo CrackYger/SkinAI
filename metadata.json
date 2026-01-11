@@ -1,0 +1,8 @@
+{
+  "name": "GlowAI - Smart Skincare",
+  "description": "Eine hochmoderne KI-Hautanalyse-App im Apple-Design, die Ihre Haut scannt und personalisierte Pflegepläne erstellt.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}
