@@ -9,10 +9,7 @@ export interface SkinAnalysis {
   summary: string;
   morningRoutine: RoutineStep[];
   eveningRoutine: RoutineStep[];
-  morningRoutineB?: RoutineStep[];
-  eveningRoutineB?: RoutineStep[];
   tips: string[];
-  isAlternating: boolean;
 }
 
 export interface RoutineStep {
@@ -20,15 +17,14 @@ export interface RoutineStep {
   action: string;
   reason: string;
   imageUrl?: string;
-  isCustom?: boolean;
 }
 
 export interface ScannedProduct {
   name: string;
   description: string;
   ingredients: string[];
-  rating: number; // 1-10
-  suitability: string; // "Sehr gut", "Moderat", "Nicht empfohlen"
+  rating: number; 
+  suitability: string; 
   personalReason: string;
   imageUrl?: string;
 }
@@ -41,13 +37,6 @@ export interface QuizData {
   sensitivity: string;
   waterIntake: string;
   sleepHours: string;
-}
-
-export interface DailyProgress {
-  date: string;
-  score: number;
-  stress: number;
-  skinFeeling: number;
 }
 
 export interface WeatherData {
@@ -65,10 +54,9 @@ export interface UserSettings {
   isSetupComplete: boolean;
   points: number;
   streak: number;
-  lastActiveDate?: string;
 }
 
-export type AppStep = 'welcome' | 'scan' | 'quiz' | 'analyzing' | 'result' | 'care' | 'profile' | 'daily_scan' | 'product_scan' | 'product_result';
+export type AppStep = 'welcome' | 'scan' | 'quiz' | 'analyzing' | 'result' | 'care' | 'profile' | 'daily_scan' | 'product_scan' | 'product_result' | 'scan_hub';
 
 export interface ScanStep {
   label: string;

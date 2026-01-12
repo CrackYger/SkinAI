@@ -8,9 +8,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script>
-      // Sicherstellen, dass process.env existiert, ohne existierende Objekte zu überschreiben
       window.process = window.process || {};
       window.process.env = window.process.env || {};
     </script>
@@ -22,25 +21,121 @@
         -webkit-font-smoothing: antialiased;
         margin: 0;
         overflow-x: hidden;
+        transition: background-color 0.5s ease, color 0.5s ease;
       }
+      
+      body.dark-mode {
+        background-color: #000000;
+        color: #f5f5f7;
+      }
+
       .no-scrollbar::-webkit-scrollbar { display: none; }
       .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       
       .apple-blur {
         backdrop-filter: blur(24px);
         -webkit-backdrop-filter: blur(24px);
-        background-color: rgba(255, 255, 255, 0.75);
       }
       
+      .light .apple-blur { background-color: rgba(255, 255, 255, 0.8); }
+      .dark .apple-blur { background-color: rgba(28, 28, 30, 0.8); }
+      
+      @keyframes float {
+        0% { transform: translateY(0px) rotate(0deg); }
+        50% { transform: translateY(-15px) rotate(1deg); }
+        100% { transform: translateY(0px) rotate(0deg); }
+      }
+      
+      @keyframes pulse-glow {
+        0% { box-shadow: 0 0 0 0 rgba(0, 0, 0, 0.2); }
+        70% { box-shadow: 0 0 0 20px rgba(0, 0, 0, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(0, 0, 0, 0); }
+      }
+
+      @keyframes blop {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.1); }
+        100% { transform: scale(1); }
+      }
+
+      .blop-anim { animation: blop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+
+      @keyframes shine {
+        from { left: -100%; }
+        to { left: 100%; }
+      }
+
+      .animate-float { animation: float 6s ease-in-out infinite; }
+      .animate-pulse-glow { animation: pulse-glow 2s infinite; }
+      
+      .shine-effect {
+        position: relative;
+        overflow: hidden;
+      }
+      .shine-effect::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 50%;
+        height: 100%;
+        background: linear-gradient(to right, transparent, rgba(255,255,255,0.3), transparent);
+        transform: skewX(-25deg);
+        animation: shine 3s infinite;
+      }
+
+      .mesh-gradient {
+        background: linear-gradient(-45deg, #f3f4f6, #fff, #f9fafb, #f3f4f6);
+        background-size: 400% 400%;
+        animation: bg-glow 15s ease infinite;
+      }
+
+      .dark-mode .mesh-gradient {
+        background: linear-gradient(-45deg, #000, #1c1c1e, #0a0a0a, #000);
+        background-size: 400% 400%;
+      }
+
+      @keyframes bg-glow {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+      }
+
+      .fade-in-up {
+        animation: fadeInUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+
+      @keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
       @keyframes scan-line { 
         0% { transform: translateY(0); opacity: 0; } 
         10% { opacity: 1; } 
         90% { opacity: 1; } 
         100% { transform: translateY(320px); opacity: 0; } 
       }
-      
-      .scan-anim {
-        animation: scan-line 3s ease-in-out infinite;
+      .scan-anim { animation: scan-line 3s ease-in-out infinite; }
+
+      .face-guide {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 70%;
+        height: 75%;
+        border: 2px dashed rgba(255,255,255,0.5);
+        border-radius: 100% 100% 90% 90% / 120% 120% 80% 80%;
+        pointer-events: none;
+        z-index: 20;
+        transition: border-color 0.3s ease;
+      }
+      .face-guide.detected {
+        border-color: #22c55e;
+        border-style: solid;
+        border-width: 3px;
+        box-shadow: 0 0 20px rgba(34, 197, 94, 0.4);
       }
     </style>
     <script type="importmap">
@@ -56,7 +151,7 @@
     }
     </script>
   </head>
-  <body>
+  <body class="mesh-gradient">
     <div id="root"></div>
     <script type="module" src="./index.tsx"></script>
   </body>
