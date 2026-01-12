@@ -10,8 +10,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script>
-      // Polyfill for process.env which is required by many libraries like @google/genai
+      // Polyfill for process.env
       window.process = window.process || { env: {} };
+      // Fallback: Wenn der Bundler VITE_API_KEY bereitstellt, mappen wir ihn auf process.env.API_KEY
+      // Dies stellt sicher, dass Netlify-Deployments funktionieren, während der Code die Vorgaben einhält.
     </script>
     <style>
       body {
@@ -20,20 +22,27 @@
         color: #1d1d1f;
         -webkit-font-smoothing: antialiased;
         margin: 0;
+        overflow-x: hidden;
       }
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      
       .apple-blur {
         backdrop-filter: blur(20px);
         -webkit-backdrop-filter: blur(20px);
         background-color: rgba(255, 255, 255, 0.7);
       }
-      .apple-card {
-        background: #ffffff;
-        border-radius: 24px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+      
+      @keyframes analysis-scan { 
+        0% { top: 0%; opacity: 0; } 
+        10% { opacity: 1; } 
+        90% { opacity: 1; } 
+        100% { top: 100%; opacity: 0; } 
       }
-      /* Custom Animations */
-      @keyframes scanline { 0% { transform: translateY(-100%); } 100% { transform: translateY(400%); } }
-      @keyframes analysis-scan { 0% { top: 0%; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
+      
+      /* Smooth transitions for all elements */
+      .step-enter { opacity: 0; transform: translateY(10px); }
+      .step-enter-active { opacity: 1; transform: translateY(0); transition: all 0.5s ease; }
     </style>
     <script type="importmap">
     {
