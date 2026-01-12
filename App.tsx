@@ -14,7 +14,6 @@ const App: React.FC = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   
-  // Quiz & Analysis states
   const [quizStep, setQuizStep] = useState(0);
   const [quiz, setQuiz] = useState<QuizData>({
     age: '', concerns: [], lifestyle: '', sunExposure: '', sensitivity: '', waterIntake: '', sleepHours: ''
@@ -23,7 +22,6 @@ const App: React.FC = () => {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [scannedProduct, setScannedProduct] = useState<ScannedProduct | null>(null);
   
-  // Daily Trackers
   const [waterAmount, setWaterAmount] = useState(1.5);
   const [sleepAmount, setSleepAmount] = useState(7.5);
   const [stressLevel, setStressLevel] = useState(3);
@@ -51,7 +49,7 @@ const App: React.FC = () => {
           const data = await getRealtimeWeather(pos.coords.latitude, pos.coords.longitude);
           setWeather(data);
         } catch (e) { console.error("Weather fetch error", e); }
-      });
+      }, () => console.warn("Geolocation permission denied"));
     }
   }, []);
 
@@ -98,8 +96,7 @@ const App: React.FC = () => {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
       if (videoRef.current) videoRef.current.srcObject = stream;
     } catch (err) { 
-      console.error("Camera access error", err);
-      setErrorMsg("Kamera-Zugriff verweigert oder nicht verfügbar.");
+      setErrorMsg("Kamera-Zugriff verweigert oder nicht verfügbar. Bitte Berechtigungen prüfen.");
       setStep('analyzing');
     }
   };
@@ -134,8 +131,9 @@ const App: React.FC = () => {
             const res = await analyzeProduct(dataUrl, quiz);
             setScannedProduct(res);
             setStep('product_result');
-          } catch (e) { 
-            setErrorMsg("Produkt-Analyse fehlgeschlagen. Prüfe API Key.");
+          } catch (e: any) { 
+            const msg = e.message === "API_KEY_MISSING" ? "API_KEY fehlt in Netlify." : "Produkt-Analyse fehlgeschlagen.";
+            setErrorMsg(msg);
             setStep('analyzing');
           }
           return;
@@ -159,16 +157,19 @@ const App: React.FC = () => {
     setLoadingMsg("KI-Hautanalyse wird vorbereitet...");
     setStep('analyzing');
     try {
+      if (Object.keys(images).length === 0) {
+        throw new Error("Bitte mache zuerst die Gesichtsscans.");
+      }
       const result = await analyzeSkin(images, quiz, weather || undefined, (msg) => setLoadingMsg(msg));
       setAnalysis(result);
       setSettings(prev => ({...prev, isSetupComplete: true, points: prev.points + 100, streak: prev.streak + 1}));
       setStep('result');
     } catch (err: any) { 
-      console.error(err);
+      console.error("Analysis Error:", err);
       if (err.message === "API_KEY_MISSING") {
-        setErrorMsg("API_KEY fehlt. Bitte in Netlify Environment Variables setzen.");
+        setErrorMsg("API_KEY fehlt. Bitte prüfe die Netlify Environment Variables (API_KEY muss gesetzt sein).");
       } else {
-        setErrorMsg("Analyse fehlgeschlagen. Bitte Internetverbindung prüfen.");
+        setErrorMsg(err.message || "Analyse fehlgeschlagen. Bitte Internetverbindung prüfen.");
       }
     }
   };
@@ -183,7 +184,7 @@ const App: React.FC = () => {
           <h1 className="text-xl font-black tracking-tight">GlowAI</h1>
         </div>
         {settings.isSetupComplete && (
-           <div className="flex items-center gap-3 animate-in fade-in slide-in-from-right-10">
+           <div className="flex items-center gap-3">
              <div className="flex items-center gap-1 bg-orange-500/10 text-orange-500 px-3 py-1 rounded-full border border-orange-500/20">
                 <Flame className="w-3 h-3 fill-orange-500" />
                 <span className="text-[10px] font-black">{settings.streak}</span>
@@ -436,7 +437,7 @@ const RoutineManager: React.FC<{ analysis: SkinAnalysis, dark: boolean }> = ({ a
       <div className="grid grid-cols-1 gap-3">
         {analysis.morningRoutine && analysis.morningRoutine.length > 0 ? (
           analysis.morningRoutine.map((s, i) => <RoutineCard key={i} step={s} dark={dark} />)
-        ) : <p className="text-center text-xs text-zinc-400 py-4">Keine Schritte generiert.</p>}
+        ) : <p className="text-center text-xs text-zinc-400 py-4">Routine wird generiert...</p>}
       </div>
     </div>
     <div className="space-y-4">
@@ -444,7 +445,7 @@ const RoutineManager: React.FC<{ analysis: SkinAnalysis, dark: boolean }> = ({ a
       <div className="grid grid-cols-1 gap-3">
         {analysis.eveningRoutine && analysis.eveningRoutine.length > 0 ? (
           analysis.eveningRoutine.map((s, i) => <RoutineCard key={i} step={s} dark={dark} />)
-        ) : <p className="text-center text-xs text-zinc-400 py-4">Keine Schritte generiert.</p>}
+        ) : <p className="text-center text-xs text-zinc-400 py-4">Routine wird generiert...</p>}
       </div>
     </div>
   </div>

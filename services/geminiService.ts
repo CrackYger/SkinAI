@@ -2,9 +2,14 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { SkinAnalysis, QuizData, WeatherData, ScannedProduct } from "../types";
 
-// Always use process.env.API_KEY for initialization as per guidelines.
+// Die API-Richtlinien verlangen die Nutzung von process.env.API_KEY.
+// Wir fügen eine explizite Prüfung hinzu, um im Fehlerfall genauere Infos zu geben.
 const getAI = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey || apiKey === "undefined" || apiKey === "") {
+    throw new Error("API_KEY_MISSING");
+  }
+  return new GoogleGenAI({ apiKey });
 };
 
 const FAST_MODEL = 'gemini-3-flash-preview';
@@ -12,48 +17,42 @@ const IMAGE_MODEL = 'gemini-2.5-flash-image';
 
 function extractJSON(text: string) {
   try {
+    // Suche nach dem ersten { und dem letzten }, um JSON aus Markdown-Antworten zu extrahieren
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
     return JSON.parse(text);
   } catch (e) {
-    console.error("Failed to parse JSON from AI response:", text);
-    throw new Error("KI_FORMAT_ERROR");
+    console.error("AI Response Text was:", text);
+    throw new Error("Die KI-Antwort konnte nicht verarbeitet werden. Bitte versuche es erneut.");
   }
 }
 
 export async function getRealtimeWeather(lat: number, lon: number): Promise<WeatherData> {
   try {
     const ai = getAI();
-    // Using gemini-3-flash-preview with googleSearch for real-time weather data.
-    // We omit responseMimeType as search grounding responses might contain grounded citations or metadata.
     const response = await ai.models.generateContent({
       model: FAST_MODEL,
-      contents: `Wetterdaten für Lat ${lat}, Lon ${lon} als JSON (uvIndex, pollution, humidity, temp).`,
+      contents: `Gib Wetterdaten für Koordinaten (${lat}, ${lon}) als JSON zurück: {uvIndex: number, pollution: string, humidity: string, temp: string}. Nutze Google Search für Echtzeitdaten.`,
       config: { 
         tools: [{ googleSearch: {} }]
       }
     });
-    // extractJSON handles finding the JSON block within the response text.
     return extractJSON(response.text);
   } catch (e) {
-    return { uvIndex: 1, pollution: "Gut", humidity: "50%", temp: "21°C" };
+    return { uvIndex: 1, pollution: "Normal", humidity: "50%", temp: "21°C" };
   }
 }
 
 export async function generateProductImage(description: string): Promise<string> {
   try {
     const ai = getAI();
-    // Image generation using gemini-2.5-flash-image.
     const response = await ai.models.generateContent({
       model: IMAGE_MODEL,
       contents: { 
-        parts: [{ text: `Professional minimalist product photography of a premium skincare bottle: ${description}. Soft studio lighting, neutral background, 4k, high-end design.` }] 
+        parts: [{ text: `Minimalist premium skincare product photography: ${description}. White background, soft studio light, 4k.` }] 
       },
-      config: { 
-        imageConfig: { aspectRatio: "1:1" } 
-      }
+      config: { imageConfig: { aspectRatio: "1:1" } }
     });
-    // Correctly iterate through parts to find the image part.
     const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
     return part ? `data:image/png;base64,${part.inlineData.data}` : 'https://images.unsplash.com/photo-1620916566398-39f1143ab7be?auto=format&fit=crop&q=80&w=400';
   } catch (e) {
@@ -63,13 +62,12 @@ export async function generateProductImage(description: string): Promise<string>
 
 export async function analyzeProduct(imageData: string, quiz: QuizData): Promise<ScannedProduct> {
   const ai = getAI();
-  // Using gemini-3-flash-preview for vision-based product analysis.
   const response = await ai.models.generateContent({
     model: FAST_MODEL,
     contents: {
       parts: [
         { inlineData: { mimeType: "image/jpeg", data: imageData.split(',')[1] } },
-        { text: `Analysiere dieses Skincare-Produkt für ein Profil: ${JSON.stringify(quiz)}. Gib JSON zurück: {name, description, ingredients[], rating, suitability, personalReason}.` }
+        { text: `Analysiere dieses Produkt für einen Nutzer mit Hautzielen: ${quiz.concerns.join(', ')}. Gib JSON zurück: {name, description, ingredients[], rating, suitability, personalReason}.` }
       ]
     },
     config: { responseMimeType: "application/json" }
@@ -87,20 +85,21 @@ export async function analyzeSkin(
   onProgress?: (msg: string) => void
 ): Promise<SkinAnalysis> {
   const ai = getAI();
-  if (onProgress) onProgress("Bilder werden analysiert...");
-  const imageParts = Object.values(images).map(base64 => ({ inlineData: { mimeType: "image/jpeg", data: base64.split(',')[1] } }));
   
-  const prompt = `Analysiere diese Hautscans im Detail. 
-    NUTZERPROFIL: ${JSON.stringify(quiz)}. 
-    WETTER: ${JSON.stringify(weather)}. 
-    ERSTELLE: 
-    1. Score (0-100)
-    2. Hauttyp (z.B. Ölig, Mischhaut)
-    3. Morgenroutine (3 Schritte)
-    4. Abendroutine (3 Schritte)
-    5. 3 spezifische Tipps.
-    
-    GIB NUR VALIDES JSON ZURÜCK: {overallScore, hydration, purity, skinType, morningRoutine:[{product, action, reason}], eveningRoutine:[{product, action, reason}], tips:[]}.`;
+  if (Object.keys(images).length === 0) {
+    throw new Error("Keine Bilder für die Analyse gefunden. Bitte starte den Scan erneut.");
+  }
+
+  if (onProgress) onProgress("Bilder werden analysiert...");
+  const imageParts = Object.values(images).map(base64 => ({ 
+    inlineData: { mimeType: "image/jpeg", data: base64.split(',')[1] } 
+  }));
+  
+  const prompt = `Führe eine dermatologische KI-Analyse durch.
+    Profil: ${JSON.stringify(quiz)}.
+    Umgebung: ${JSON.stringify(weather)}.
+    Erstelle eine Morgen- und Abendroutine mit jeweils 3 Produkten.
+    Antworte STRENG im JSON-Format: {overallScore, hydration, purity, skinType, morningRoutine:[{product, action, reason}], eveningRoutine:[{product, action, reason}], tips:[string]}.`;
 
   const response = await ai.models.generateContent({
     model: FAST_MODEL,
@@ -111,12 +110,15 @@ export async function analyzeSkin(
   if (onProgress) onProgress("Routine wird erstellt...");
   const data = extractJSON(response.text);
   
-  // Enrich steps with high-quality generated product visuals.
   const enrich = async (steps: any[]) => {
     if (!steps || !Array.isArray(steps)) return [];
     return await Promise.all(steps.slice(0, 3).map(async s => {
-      const img = await generateProductImage(s.product);
-      return { ...s, imageUrl: img };
+      try {
+        const img = await generateProductImage(s.product);
+        return { ...s, imageUrl: img };
+      } catch (e) {
+        return { ...s, imageUrl: 'https://images.unsplash.com/photo-1620916566398-39f1143ab7be?auto=format&fit=crop&q=80&w=400' };
+      }
     }));
   };
 
@@ -128,10 +130,10 @@ export async function analyzeSkin(
     ...data,
     morningRoutine: morningEnriched,
     eveningRoutine: eveningEnriched,
-    overallScore: data.overallScore || 80,
-    hydration: data.hydration || 75,
+    overallScore: data.overallScore || 75,
+    hydration: data.hydration || 65,
     purity: data.purity || 70,
     skinType: data.skinType || "Mischhaut",
-    tips: data.tips || ["Viel Wasser trinken", "LSF 50 nutzen"]
+    tips: data.tips && data.tips.length > 0 ? data.tips : ["Viel Wasser trinken", "LSF 50 nutzen"]
   } as SkinAnalysis;
 }
