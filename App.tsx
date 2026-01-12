@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, CheckCircle2, ChevronRight, ChevronDown, Activity, Droplets, Sparkles, Shield, User, Plus, Minus, Package, Loader2, AlertTriangle, Trash, HardDrive, Bell, Moon, Zap, Smile, Trophy, Flame, Scan, Heart, Wand2, Info, Download, Upload, BarChart3, Clock, Search, X, AlertOctagon, RefreshCw, ArrowRight, Eye, Sun } from 'lucide-react';
+import { Camera, CheckCircle2, ChevronRight, ChevronDown, Activity, Droplets, Sparkles, Shield, User, Plus, Minus, Package, Loader2, AlertTriangle, Trash, HardDrive, Bell, Moon, Zap, Smile, Trophy, Flame, Scan, Heart, Wand2, Info, Download, Upload, BarChart3, Clock, Search, X, AlertOctagon, RefreshCw, ArrowRight, Eye, Sun, Cpu, Database, Fingerprint } from 'lucide-react';
 import { AppStep, QuizData, SkinAnalysis, ScanStep, RoutineStep, UserSettings, WeatherData, ScannedProduct, ProductSearchResult, RoutineAnalysis } from './types';
 import { AppleCard, PrimaryButton, SecondaryButton } from './components/AppleCard';
 import { analyzeSkin, getRealtimeWeather, analyzeProduct, findProducts, generateProductImage, analyzeFullRoutine } from './services/geminiService';
@@ -8,7 +8,7 @@ import { analyzeSkin, getRealtimeWeather, analyzeProduct, findProducts, generate
 const App: React.FC = () => {
   const [step, setStep] = useState<AppStep>('welcome');
   const [loadingMsg, setLoadingMsg] = useState('Initialisiere...');
-  const [loadingStatus, setLoadingStatus] = useState('Warte auf System...');
+  const [loadingStatus, setLoadingStatus] = useState('Analyse wird vorbereitet');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [images, setImages] = useState<{ [key: string]: string }>({});
   const [scanIndex, setScanIndex] = useState(0);
@@ -32,6 +32,7 @@ const App: React.FC = () => {
   const [isSearchingProduct, setIsSearchingProduct] = useState(false);
   const [routineAnalysisResult, setRoutineAnalysisResult] = useState<RoutineAnalysis | null>(null);
   const [isAnalyzingRoutine, setIsAnalyzingRoutine] = useState(false);
+  const [routineLoadingMsg, setRoutineLoadingMsg] = useState('Prüfe Formulierung...');
 
   // Visual Analysis Layers
   const [activeLayer, setActiveLayer] = useState<'acne' | 'sebum' | 'sunDamage' | null>(null);
@@ -180,8 +181,11 @@ const App: React.FC = () => {
         }
 
         if (step === 'product_scan') {
-          setLoadingMsg("Inhaltsstoffe...");
+          setLoadingMsg("Analysiere Inhaltsstoffe...");
+          // We set image temporarily for the loading screen visual
+          setImages(prev => ({ ...prev, 'product_temp': dataUrl }));
           setStep('analyzing');
+          
           try {
             const res = await analyzeProduct(dataUrl, quiz);
             setScannedProduct(res);
@@ -226,20 +230,25 @@ const App: React.FC = () => {
   const handleQuizSubmit = async () => {
     setErrorMsg(null);
     setStep('analyzing');
-    setLoadingMsg("KI Analyse");
-    setLoadingStatus("Scanne Porengröße...");
+    setLoadingMsg("Hautbild wird analysiert");
+    setLoadingStatus("Verarbeite Aufnahme...");
 
-    const ticker = [
-      "Erkenne Hautstruktur...",
-      "Analysiere UV-Schäden...",
-      "Prüfe Hydrations-Level...",
-      "Berechne Anti-Aging Score...",
-      "Finalisiere Routine..."
+    const friendlyMessages = [
+      "Untersuche Hautstruktur...",
+      "Analysiere Feuchtigkeitswerte...",
+      "Identifiziere Problemzonen...",
+      "Erstelle persönlichen Plan...",
+      "Gleich fertig..."
     ];
+
     let i = 0;
     const interval = setInterval(() => {
-      if(i < ticker.length) setLoadingStatus(ticker[i++]);
-      else clearInterval(interval);
+      if(i < friendlyMessages.length) {
+        setLoadingMsg(friendlyMessages[i]);
+        i++;
+      } else {
+        clearInterval(interval);
+      }
     }, 2000);
 
     try {
@@ -300,9 +309,26 @@ const App: React.FC = () => {
   const triggerRoutineAnalysis = async () => {
     if (!analysis) return;
     setIsAnalyzingRoutine(true);
-    const result = await analyzeFullRoutine(analysis.morningRoutine, analysis.eveningRoutine, quiz);
-    setRoutineAnalysisResult(result);
-    setIsAnalyzingRoutine(false);
+    setRoutineLoadingMsg('Analysiere Wirkstoffe...');
+    
+    const msgs = ['Prüfe Unverträglichkeiten...', 'Validiere pH-Werte...', 'Checke Sonnenschutz...', 'Optimiere Reihenfolge...'];
+    let i = 0;
+    const interval = setInterval(() => {
+        if (i < msgs.length) {
+            setRoutineLoadingMsg(msgs[i]);
+            i++;
+        }
+    }, 1200);
+
+    try {
+      const result = await analyzeFullRoutine(analysis.morningRoutine, analysis.eveningRoutine, quiz);
+      setRoutineAnalysisResult(result);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      clearInterval(interval);
+      setIsAnalyzingRoutine(false);
+    }
   };
 
   const exportData = () => {
@@ -340,7 +366,7 @@ const App: React.FC = () => {
 
   return (
     <div className={`min-h-screen max-w-md mx-auto px-6 py-10 flex flex-col transition-all duration-500 ${settings.darkMode ? 'bg-black text-white' : 'bg-transparent text-zinc-900'}`}>
-      <header className="mb-8 flex items-center justify-between z-10 fade-in-up">
+      <header className={`mb-8 flex items-center justify-between z-10 fade-in-up ${step === 'analyzing' ? 'opacity-0' : 'opacity-100'}`}>
         <div className="flex items-center gap-3">
           <div className={`w-10 h-10 ${settings.darkMode ? 'bg-white text-black' : 'bg-black text-white'} rounded-2xl flex items-center justify-center shadow-lg transition-colors duration-500`}>
             <Sparkles className="w-5 h-5" />
@@ -521,30 +547,84 @@ const App: React.FC = () => {
         )}
 
         {step === 'analyzing' && (
-          <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-8 animate-in fade-in">
-            {!errorMsg ? (
-              <>
-                <div className={`w-24 h-24 rounded-3xl shadow-xl flex items-center justify-center relative overflow-hidden transition-colors duration-500 ${settings.darkMode ? 'bg-zinc-900' : 'bg-white'}`}>
-                  <Loader2 className={`w-10 h-10 animate-spin ${settings.darkMode ? 'text-zinc-700' : 'text-zinc-200'}`} />
-                  <div className={`absolute bottom-0 left-0 w-full h-1 animate-pulse ${settings.darkMode ? 'bg-white' : 'bg-black'}`}></div>
-                </div>
-                <div className="text-center space-y-2">
-                  <h2 className="text-2xl font-black">{loadingMsg}</h2>
-                  <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest animate-pulse">{loadingStatus}</p>
-                </div>
-              </>
-            ) : (
-              <div className={`text-center space-y-6 p-10 rounded-[40px] shadow-xl border ${settings.darkMode ? 'bg-zinc-900 border-red-900/30' : 'bg-white border-red-50'}`}>
+          <div className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden animate-in fade-in duration-700">
+             {/* Background with strong blur for glassmorphism effect */}
+             <div className="absolute inset-0 z-0">
+               <img 
+                  src={images['front'] || images['product_temp'] || "https://images.unsplash.com/photo-1552046122-03184de85e08?auto=format&fit=crop&q=80&w=800"} 
+                  className="w-full h-full object-cover" 
+                  alt="Background" 
+               />
+               <div className={`absolute inset-0 ${settings.darkMode ? 'bg-black/60' : 'bg-white/60'} backdrop-blur-xl transition-colors duration-1000`}></div>
+             </div>
+             
+             {!errorMsg ? (
+               <div className="relative z-10 w-full max-w-md px-10 flex flex-col items-center justify-center space-y-12">
+                   
+                   {/* Clean Minimalist Scanner Circle */}
+                   <div className="relative w-64 h-64">
+                      {/* Outer Breathing Ring */}
+                      <div className="breathing-ring"></div>
+                      
+                      {/* The clear "Lens" */}
+                      <div className={`absolute inset-0 rounded-full overflow-hidden shadow-2xl border-4 ${settings.darkMode ? 'border-zinc-800' : 'border-white'}`}>
+                        <img 
+                           src={images['front'] || images['product_temp'] || "https://images.unsplash.com/photo-1552046122-03184de85e08?auto=format&fit=crop&q=80&w=800"} 
+                           className="w-full h-full object-cover scale-x-[-1]" 
+                           alt="Analysis Target" 
+                        />
+                        {/* Soft Light Beam */}
+                        <div className="soft-scan-beam"></div>
+                      </div>
+                   </div>
+
+                   {/* Elegant Text Update */}
+                   <div className="text-center space-y-4 animate-pulse-soft">
+                      <h2 className={`text-2xl font-bold tracking-tight ${settings.darkMode ? 'text-white' : 'text-zinc-900'}`}>{loadingMsg}</h2>
+                      <div className="flex justify-center gap-2">
+                         <span className={`w-1.5 h-1.5 rounded-full ${settings.darkMode ? 'bg-white' : 'bg-black'} animate-bounce`} style={{ animationDelay: '0s' }}></span>
+                         <span className={`w-1.5 h-1.5 rounded-full ${settings.darkMode ? 'bg-white' : 'bg-black'} animate-bounce`} style={{ animationDelay: '0.2s' }}></span>
+                         <span className={`w-1.5 h-1.5 rounded-full ${settings.darkMode ? 'bg-white' : 'bg-black'} animate-bounce`} style={{ animationDelay: '0.4s' }}></span>
+                      </div>
+                   </div>
+
+               </div>
+             ) : (
+              <div className={`relative z-20 text-center space-y-6 p-10 rounded-[40px] shadow-xl border max-w-xs mx-auto ${settings.darkMode ? 'bg-zinc-900 border-red-900/30' : 'bg-white border-red-50'}`}>
                 <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto text-red-500">
                   <AlertTriangle className="w-8 h-8" />
                 </div>
                 <div className="space-y-2">
-                  <h3 className="font-black text-xl text-red-600">Ein Fehler ist aufgetreten</h3>
+                  <h3 className="font-black text-xl text-red-600">Scan fehlgeschlagen</h3>
                   <p className="text-zinc-500 text-sm font-medium">{errorMsg}</p>
                 </div>
-                <PrimaryButton dark={settings.darkMode} onClick={() => setStep('welcome')}>Zurück zum Start</PrimaryButton>
+                <PrimaryButton dark={settings.darkMode} onClick={() => setStep('welcome')}>Neustart</PrimaryButton>
               </div>
-            )}
+             )}
+          </div>
+        )}
+
+        {/* --- NEW ROUTINE LOADING SCREEN --- */}
+        {isAnalyzingRoutine && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center animate-in fade-in duration-300">
+            {/* Blurred Backdrop */}
+            <div className={`absolute inset-0 backdrop-blur-md ${settings.darkMode ? 'bg-black/60' : 'bg-white/60'}`}></div>
+            
+            {/* Floating Card */}
+            <div className={`relative z-10 w-full max-w-xs p-8 rounded-[40px] shadow-2xl flex flex-col items-center text-center space-y-6 ${settings.darkMode ? 'bg-zinc-900 border border-zinc-800' : 'bg-white border border-white'}`}>
+              <div className="relative">
+                <div className={`w-20 h-20 rounded-full flex items-center justify-center ${settings.darkMode ? 'bg-zinc-800 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
+                  <RefreshCw className="w-8 h-8 animate-spin" style={{ animationDuration: '2s' }} />
+                </div>
+                <div className="absolute top-0 right-0 w-6 h-6 bg-green-500 rounded-full border-4 border-white dark:border-zinc-900 animate-pulse"></div>
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-lg font-black tracking-tight">{routineLoadingMsg}</h3>
+                <p className="text-xs font-medium text-zinc-500 max-w-[200px] mx-auto leading-relaxed">
+                  Validiere Wirkstoff-Interaktionen und Sicherheit...
+                </p>
+              </div>
+            </div>
           </div>
         )}
 

@@ -11,7 +11,7 @@ const getAI = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-// Use gemini-3-pro-preview for complex reasoning tasks
+// Use gemini-3-pro-preview for complex reasoning tasks (Skin Analysis)
 const TEXT_MODEL = 'gemini-3-pro-preview';
 // Use gemini-2.5-flash-image for image generation tasks
 const IMAGE_MODEL = 'gemini-2.5-flash-image';
@@ -50,28 +50,31 @@ export async function analyzeSkin(
     inlineData: { mimeType: "image/jpeg", data: base64.split(',')[1] } 
   }));
   
-  const systemInstruction = `Du bist ein hochstrenger dermatologischer Experte. 
-    Analysiere die Hautbilder (Frontal, Links, Rechts) extrem detailliert.
+  const systemInstruction = `Du bist ein Weltklasse-Dermatologe und Skincare-Formulierer. 
+    Deine Aufgabe:
+    1. Analysiere die Hautbilder (Frontal, Links, Rechts) auf klinischem Niveau.
+    2. Erstelle eine PERFEKTE Routine.
     
-    Ich benötige spezifische Metriken und VISUELLE KOORDINATEN für Probleme auf dem Frontal-Bild.
-    Stell dir ein Koordinatensystem über dem Gesicht vor: X (0-100, links nach rechts), Y (0-100, oben nach unten).
-    Identifiziere Zonen für:
-    - Akne/Unreinheiten
-    - Talg/Ölglanz (meist T-Zone)
-    - Sonnenschäden/Pigmentierung
+    WICHTIG FÜR DIE ROUTINE:
+    - Vermeide strikt Konflikte (z.B. KEIN Retinol gleichzeitig mit Vitamin C oder starken Säuren in derselben Routine-Zeit).
+    - Trenne aktive Wirkstoffe: Vitamin C morgens, Retinol/Säuren abends.
+    - Berücksichtige das Alter (${quiz.age}) und Hautziele (${quiz.concerns.join(', ')}).
+    - Wenn die Haut sensibel ist, wähle sanfte Alternativen (z.B. Bakuchiol statt Retinol, PHA statt AHA).
+    - Die Routine muss realistisch und effektiv sein.
     
-    Bewertungskriterien (0-100, wobei 100 PERFEKT ist):
-    - Acne Score: 100 = Keine Pickel, 0 = Schwere Akne.
-    - Sebum Score: 100 = Matt/Balanced, 0 = Extrem fettig.
-    - Sun Damage Score: 100 = Keine Flecken, 0 = Starke Schäden.
+    VISUELLE ANALYSE:
+    Nutze ein Koordinatensystem (X 0-100, Y 0-100) für das Frontalbild um Probleme zu lokalisieren.
     
-    Gib auch die Routine zurück.
-    Berücksichtige das Alter (${quiz.age}) und die genannten Probleme (${quiz.concerns.join(', ')}).`;
+    Bewertungskriterien (0-100, 100 = Perfekt):
+    - Acne Score: 100 = Rein, 0 = Akne.
+    - Sebum Score: 100 = Ausgeglichen, 0 = Ölig/Trocken.
+    - Sun Damage: 100 = Makellos, 0 = Stark geschädigt.
+  `;
 
   try {
     const response = await ai.models.generateContent({
       model: TEXT_MODEL,
-      contents: { parts: [...imageParts, { text: "Führe die Analyse durch und gib alle Daten inklusive Koordinaten JSON zurück." }] },
+      contents: { parts: [...imageParts, { text: "Führe die Analyse durch und gib das Ergebnis als JSON zurück." }] },
       config: { 
         systemInstruction,
         responseMimeType: "application/json",
@@ -139,24 +142,27 @@ export async function analyzeSkin(
     
     const data = JSON.parse(text);
     
-    // Process images sequentially
+    // Process images in parallel for speed!
     const enrich = async (steps: any[]) => {
-      const enrichedSteps = [];
-      for (const s of steps) {
+      return Promise.all(steps.map(async (s) => {
         try {
            const img = await generateProductImage(s.product);
-           enrichedSteps.push({ ...s, imageUrl: img });
+           return { ...s, imageUrl: img };
         } catch (e) {
-           enrichedSteps.push({ ...s, imageUrl: getRandomFallbackImage() });
+           return { ...s, imageUrl: getRandomFallbackImage() };
         }
-      }
-      return enrichedSteps;
+      }));
     };
+
+    const [morning, evening] = await Promise.all([
+        enrich(data.morningRoutine || []),
+        enrich(data.eveningRoutine || [])
+    ]);
 
     return {
       ...data,
-      morningRoutine: await enrich(data.morningRoutine || []),
-      eveningRoutine: await enrich(data.eveningRoutine || [])
+      morningRoutine: morning,
+      eveningRoutine: evening
     } as SkinAnalysis;
   } catch (err) {
     return handleGeminiError(err);
@@ -170,7 +176,7 @@ export async function generateProductImage(description: string): Promise<string>
     const response = await ai.models.generateContent({
       model: IMAGE_MODEL,
       contents: { 
-        parts: [{ text: `Minimalist aesthetic skincare product bottle: ${description}. High key lighting, white background.` }] 
+        parts: [{ text: `High-end skincare product photography, minimalist bottle, white background, studio lighting: ${description}` }] 
       },
       config: { imageConfig: { aspectRatio: "1:1" } }
     });
@@ -178,11 +184,11 @@ export async function generateProductImage(description: string): Promise<string>
     return part ? `data:image/png;base64,${part.inlineData.data}` : getRandomFallbackImage();
   } catch (e: any) {
     // Handle quota errors silently with fallback
-    if (e.status === 429 || e?.error?.code === 429 || e.message?.includes('quota') || e.message?.includes('RESOURCE_EXHAUSTED')) {
+    // if (e.status === 429 || e?.error?.code === 429 || e.message?.includes('quota') || e.message?.includes('RESOURCE_EXHAUSTED')) {
       // console.warn("Quota exceeded for image generation. Using fallback.");
-    } else {
-      console.error("Image Gen Error:", e);
-    }
+    // } else {
+    //   console.error("Image Gen Error:", e);
+    // }
     return getRandomFallbackImage();
   }
 }
@@ -259,23 +265,25 @@ export async function analyzeFullRoutine(
   try {
     const ai = getAI();
     const prompt = `
-      Analysiere diese Skincare-Routine für folgendes Profil:
+      Du bist ein erfahrener kosmetischer Chemiker. Validiere diese Routine.
+      HINWEIS: Ein Teil dieser Routine wurde bereits basierend auf einer Hautanalyse erstellt. Sei also nicht überkritisch bei Standard-Kombinationen, sondern suche nach ECHTEN Fehlern oder GEFÄHRLICHEN Konflikten.
+      
+      Nutzer-Profil:
       Alter: ${quiz.age}, Hautziele: ${quiz.concerns.join(', ')}, Typ: ${quiz.sensitivity}.
       
       Morgens: ${morning.map(m => m.product).join(', ')}
       Abends: ${evening.map(e => e.product).join(', ')}
 
-      Prüfe auf:
-      1. Wirkstoff-Konflikte (z.B. Retinol + Vitamin C gleichzeitig).
-      2. Produkte die nicht zum Hauttyp passen.
-      3. Überpflege oder fehlende Essentials (z.B. fehlender SPF).
+      Aufgaben:
+      1. Prüfe auf chemische Inkompatibilitäten (z.B. Retinol + AHA zur gleichen Zeit -> schlecht. Aber AHA morgens, Retinol abends -> gut).
+      2. Prüfe ob der Sonnenschutz (SPF) fehlt. Das ist ein kritischer Fehler.
+      3. Schlage Alternativen vor, wenn ein Produkt für ${quiz.sensitivity} Haut ungeeignet ist.
       
-      Gib einen Score (0-100) für die Routine-Qualität.
-      Nenne Warnungen und schlage konkrete Alternativen für schlechte Produkte vor.
+      Gib einen Score (0-100). 90-100 ist eine sichere, gute Routine.
     `;
 
     const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
+      model: 'gemini-3-flash-preview', // Switch to Flash for speed!
       contents: prompt,
       config: {
         responseMimeType: "application/json",

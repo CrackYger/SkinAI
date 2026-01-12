@@ -8,7 +8,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <script>
       window.process = window.process || {};
       window.process.env = window.process.env || {};
@@ -28,6 +28,8 @@
         background-color: #000000;
         color: #f5f5f7;
       }
+
+      .font-mono { font-family: 'JetBrains Mono', monospace; }
 
       .no-scrollbar::-webkit-scrollbar { display: none; }
       .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -51,6 +53,11 @@
         70% { box-shadow: 0 0 0 20px rgba(0, 0, 0, 0); }
         100% { box-shadow: 0 0 0 0 rgba(0, 0, 0, 0); }
       }
+      
+      @keyframes pulse-soft {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.8; transform: scale(0.98); }
+      }
 
       @keyframes blop {
         0% { transform: scale(1); }
@@ -67,6 +74,7 @@
 
       .animate-float { animation: float 6s ease-in-out infinite; }
       .animate-pulse-glow { animation: pulse-glow 2s infinite; }
+      .animate-pulse-soft { animation: pulse-soft 3s ease-in-out infinite; }
       
       .shine-effect {
         position: relative;
@@ -111,12 +119,12 @@
       }
 
       @keyframes scan-line { 
-        0% { transform: translateY(0); opacity: 0; } 
+        0% { top: 0%; opacity: 0; } 
         10% { opacity: 1; } 
         90% { opacity: 1; } 
-        100% { transform: translateY(320px); opacity: 0; } 
+        100% { top: 100%; opacity: 0; } 
       }
-      .scan-anim { animation: scan-line 3s ease-in-out infinite; }
+      .scan-anim { animation: scan-line 2s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
 
       .face-guide {
         position: absolute;
@@ -136,6 +144,41 @@
         border-style: solid;
         border-width: 3px;
         box-shadow: 0 0 20px rgba(34, 197, 94, 0.4);
+      }
+
+      /* Clean Soft Scanner */
+      .soft-scan-beam {
+        position: absolute;
+        width: 100%;
+        height: 40%;
+        background: linear-gradient(to bottom, transparent, rgba(255,255,255,0.4), transparent);
+        animation: softScan 3s ease-in-out infinite;
+        pointer-events: none;
+      }
+
+      .dark-mode .soft-scan-beam {
+         background: linear-gradient(to bottom, transparent, rgba(255,255,255,0.2), transparent);
+      }
+
+      @keyframes softScan {
+        0% { top: -40%; opacity: 0; }
+        20% { opacity: 1; }
+        80% { opacity: 1; }
+        100% { top: 100%; opacity: 0; }
+      }
+
+      .breathing-ring {
+        position: absolute;
+        inset: -20px;
+        border-radius: 50%;
+        border: 1px solid rgba(255,255,255,0.3);
+        animation: breathe 3s ease-in-out infinite;
+      }
+
+      @keyframes breathe {
+        0% { transform: scale(0.95); opacity: 0.3; }
+        50% { transform: scale(1.05); opacity: 0.7; }
+        100% { transform: scale(0.95); opacity: 0.3; }
       }
     </style>
     <script type="importmap">
