@@ -10,10 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script>
-      // Polyfill for process.env
       window.process = window.process || { env: {} };
-      // Fallback: Wenn der Bundler VITE_API_KEY bereitstellt, mappen wir ihn auf process.env.API_KEY
-      // Dies stellt sicher, dass Netlify-Deployments funktionieren, während der Code die Vorgaben einhält.
     </script>
     <style>
       body {
@@ -39,15 +36,12 @@
         90% { opacity: 1; } 
         100% { top: 100%; opacity: 0; } 
       }
-      
-      /* Smooth transitions for all elements */
-      .step-enter { opacity: 0; transform: translateY(10px); }
-      .step-enter-active { opacity: 1; transform: translateY(0); transition: all 0.5s ease; }
     </style>
     <script type="importmap">
     {
       "imports": {
         "@google/genai": "https://esm.sh/@google/genai@^1.35.0",
+        "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.45.0",
         "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
         "react": "https://esm.sh/react@^19.2.3",
         "react/": "https://esm.sh/react@^19.2.3/",

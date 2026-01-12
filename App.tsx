@@ -1,12 +1,18 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, RefreshCcw, CheckCircle2, ChevronRight, Activity, Droplets, Sparkles, Shield, User, Info, Check, Plus, Edit2, Save, Trash2, ArrowRight, ArrowLeft, Heart, BarChart3, TrendingUp, Calendar, Minus, ChevronDown, Download, Upload, Bell, Moon, Sun, Wind, CloudSun, Smile, Frown, Zap, Trophy, Flame, Package, Image as ImageIcon, Loader2, AlertTriangle } from 'lucide-react';
+import { Camera, RefreshCcw, CheckCircle2, ChevronRight, Activity, Droplets, Sparkles, Shield, User, Info, Check, Plus, Edit2, Save, Trash2, ArrowRight, ArrowLeft, Heart, BarChart3, TrendingUp, Calendar, Minus, ChevronDown, Download, Upload, Bell, Moon, Sun, Wind, CloudSun, Smile, Frown, Zap, Trophy, Flame, Package, Image as ImageIcon, Loader2, AlertTriangle, LogIn, LogOut, CloudCheck, CloudOff } from 'lucide-react';
 import { AppStep, QuizData, SkinAnalysis, ScanStep, RoutineStep, DailyProgress, UserSettings, WeatherData, ScannedProduct } from './types';
 import { AppleCard, PrimaryButton, SecondaryButton } from './components/AppleCard';
 import { analyzeSkin, getRealtimeWeather, analyzeProduct } from './services/geminiService';
+import { supabase } from './services/supabaseClient';
 
 const App: React.FC = () => {
-  const [step, setStep] = useState<AppStep>('welcome');
+  const [step, setStep] = useState<AppStep | 'auth'>('welcome');
+  const [user, setUser] = useState<any>(null);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  
   const [loadingMsg, setLoadingMsg] = useState('Analysiere...');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [images, setImages] = useState<{ [key: string]: string }>({});
@@ -36,6 +42,80 @@ const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const progressIntervalRef = useRef<number | null>(null);
 
+  // Auth Listener with null guard for supabase
+  useEffect(() => {
+    if (!supabase) return;
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      if (session?.user) loadUserData(session.user.id);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) loadUserData(session.user.id);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const loadUserData = async (userId: string) => {
+    if (!supabase) return;
+    try {
+      // Profile laden
+      const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single();
+      if (profile) {
+        setSettings(prev => ({ ...prev, ...profile, isSetupComplete: true }));
+      }
+      // Letzte Analyse laden
+      const { data: analyses } = await supabase.from('analyses').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(1);
+      if (analyses && analyses.length > 0) {
+        setAnalysis(analyses[0].data);
+      }
+    } catch (e) {
+      console.error("Error loading Supabase data", e);
+    }
+  };
+
+  const handleAuth = async () => {
+    if (!supabase) {
+      setErrorMsg("Cloud-Dienste sind aktuell nicht konfiguriert.");
+      return;
+    }
+    setErrorMsg(null);
+    try {
+      if (authMode === 'signup') {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        alert("Bitte bestätige deine Email!");
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        setStep('care');
+      }
+    } catch (e: any) {
+      setErrorMsg(e.message);
+    }
+  };
+
+  const saveAnalysisToCloud = async (analysisData: SkinAnalysis) => {
+    if (!user || !supabase) return;
+    try {
+      await supabase.from('analyses').insert({
+        user_id: user.id,
+        data: analysisData
+      });
+      await supabase.from('profiles').upsert({
+        id: user.id,
+        points: settings.points,
+        streak: settings.streak,
+        user_name: settings.userName
+      });
+    } catch (e) {
+      console.error("Cloud Save failed", e);
+    }
+  };
+
   const scanSteps: ScanStep[] = [
     { label: 'Frontal-Ansicht', instruction: 'Gesicht zentriert halten.', id: 'front' },
     { label: 'Linke Seite', instruction: 'Drehe den Kopf langsam nach links.', id: 'left' },
@@ -49,7 +129,7 @@ const App: React.FC = () => {
           const data = await getRealtimeWeather(pos.coords.latitude, pos.coords.longitude);
           setWeather(data);
         } catch (e) { console.error("Weather fetch error", e); }
-      }, () => console.warn("Geolocation permission denied"));
+      });
     }
   }, []);
 
@@ -96,7 +176,7 @@ const App: React.FC = () => {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
       if (videoRef.current) videoRef.current.srcObject = stream;
     } catch (err) { 
-      setErrorMsg("Kamera-Zugriff verweigert oder nicht verfügbar. Bitte Berechtigungen prüfen.");
+      setErrorMsg("Kamera-Zugriff verweigert.");
       setStep('analyzing');
     }
   };
@@ -118,7 +198,6 @@ const App: React.FC = () => {
         const dataUrl = canvasRef.current.toDataURL('image/jpeg');
         
         if (step === 'daily_scan') {
-           setLoadingMsg("Face Check läuft...");
            setStep('analyzing');
            setTimeout(() => setStep('care'), 1500);
            return;
@@ -132,8 +211,7 @@ const App: React.FC = () => {
             setScannedProduct(res);
             setStep('product_result');
           } catch (e: any) { 
-            const msg = e.message === "API_KEY_MISSING" ? "API_KEY fehlt in Netlify." : "Produkt-Analyse fehlgeschlagen.";
-            setErrorMsg(msg);
+            setErrorMsg("Produkt-Analyse fehlgeschlagen.");
             setStep('analyzing');
           }
           return;
@@ -157,20 +235,13 @@ const App: React.FC = () => {
     setLoadingMsg("KI-Hautanalyse wird vorbereitet...");
     setStep('analyzing');
     try {
-      if (Object.keys(images).length === 0) {
-        throw new Error("Bitte mache zuerst die Gesichtsscans.");
-      }
       const result = await analyzeSkin(images, quiz, weather || undefined, (msg) => setLoadingMsg(msg));
       setAnalysis(result);
       setSettings(prev => ({...prev, isSetupComplete: true, points: prev.points + 100, streak: prev.streak + 1}));
+      saveAnalysisToCloud(result);
       setStep('result');
     } catch (err: any) { 
-      console.error("Analysis Error:", err);
-      if (err.message === "API_KEY_MISSING") {
-        setErrorMsg("API_KEY fehlt. Bitte prüfe die Netlify Environment Variables (API_KEY muss gesetzt sein).");
-      } else {
-        setErrorMsg(err.message || "Analyse fehlgeschlagen. Bitte Internetverbindung prüfen.");
-      }
+      setErrorMsg(err.message || "Analyse fehlgeschlagen.");
     }
   };
 
@@ -185,10 +256,8 @@ const App: React.FC = () => {
         </div>
         {settings.isSetupComplete && (
            <div className="flex items-center gap-3">
-             <div className="flex items-center gap-1 bg-orange-500/10 text-orange-500 px-3 py-1 rounded-full border border-orange-500/20">
-                <Flame className="w-3 h-3 fill-orange-500" />
-                <span className="text-[10px] font-black">{settings.streak}</span>
-             </div>
+             {user && <CloudCheck className="w-4 h-4 text-green-500" />}
+             {!supabase && <CloudOff className="w-4 h-4 text-zinc-400" />}
              <button onClick={() => setStep('profile')} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${settings.darkMode ? 'bg-zinc-800' : 'bg-white'} shadow-sm`}>
                <User className="w-5 h-5" />
              </button>
@@ -200,13 +269,44 @@ const App: React.FC = () => {
         {step === 'welcome' && (
           <div className="space-y-6 animate-in fade-in zoom-in-95 duration-1000">
             <div className="relative rounded-[48px] overflow-hidden aspect-[4/5] shadow-2xl group">
-              <img src="https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-[2s]" alt="Hero" />
+              <img src="https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover" alt="Hero" />
               <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent flex flex-col justify-end p-12">
-                <h2 className="text-5xl font-black text-white mb-4 leading-[0.9] tracking-tighter">Deine Haut,<br/><span className="text-zinc-400">perfekt analysiert.</span></h2>
-                <p className="text-white/60 text-lg leading-tight">KI-Routine basierend auf deinem 3D-Gesichtsscan.</p>
+                <h2 className="text-5xl font-black text-white mb-4 leading-[0.9] tracking-tighter">Deine Haut,<br/><span className="text-zinc-400">{supabase ? 'Cloud gesichert.' : 'KI analysiert.'}</span></h2>
+                <p className="text-white/60 text-lg leading-tight">
+                  {supabase ? 'Analysen & Routinen überall verfügbar dank Supabase.' : 'Personalisiertes Skin-Health Tracking direkt auf deinem Device.'}
+                </p>
               </div>
             </div>
-            <PrimaryButton dark={settings.darkMode} onClick={() => setStep('scan')}>3D Scan starten</PrimaryButton>
+            {!user && supabase ? (
+               <PrimaryButton dark={settings.darkMode} onClick={() => setStep('auth')}>Account erstellen</PrimaryButton>
+            ) : (
+               <PrimaryButton dark={settings.darkMode} onClick={() => setStep('scan')}>Neuer 3D Scan</PrimaryButton>
+            )}
+            {!user && <SecondaryButton dark={settings.darkMode} onClick={() => setStep('scan')}>{supabase ? 'Als Gast fortfahren' : 'Starten'}</SecondaryButton>}
+          </div>
+        )}
+
+        {step === 'auth' && (
+          <div className="space-y-8 animate-in slide-in-from-bottom-10 duration-500">
+            <div className="text-center space-y-2">
+              <h2 className="text-3xl font-black tracking-tight">{authMode === 'login' ? 'Willkommen zurück' : 'Neu hier?'}</h2>
+              <p className="text-zinc-500 text-sm">Synchronisiere deine Hautpflegeroutine.</p>
+            </div>
+            <AppleCard dark={settings.darkMode} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest px-1">Email</label>
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={`w-full p-4 rounded-xl border ${settings.darkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-zinc-50 border-zinc-100'}`} placeholder="name@example.com" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest px-1">Passwort</label>
+                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className={`w-full p-4 rounded-xl border ${settings.darkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-zinc-50 border-zinc-100'}`} placeholder="••••••••" />
+              </div>
+              {errorMsg && <p className="text-red-500 text-xs px-1">{errorMsg}</p>}
+              <PrimaryButton dark={settings.darkMode} onClick={handleAuth}>{authMode === 'login' ? 'Einloggen' : 'Konto erstellen'}</PrimaryButton>
+              <button onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')} className="w-full text-center text-xs font-bold text-zinc-400 py-2">
+                {authMode === 'login' ? 'Noch kein Konto? Registrieren' : 'Bereits Mitglied? Login'}
+              </button>
+            </AppleCard>
           </div>
         )}
 
@@ -217,7 +317,7 @@ const App: React.FC = () => {
                 {step === 'daily_scan' ? 'Face Check' : step === 'product_scan' ? 'Produkt Scan' : scanSteps[scanIndex].label}
               </h2>
               <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.2em] animate-pulse">
-                {step === 'product_scan' ? 'Halte das Produkt ruhig' : scanSteps[scanIndex].instruction}
+                {scanSteps[scanIndex].instruction}
               </p>
             </div>
             <div className="relative aspect-square w-full max-w-[320px] mx-auto">
@@ -229,11 +329,6 @@ const App: React.FC = () => {
                 <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover scale-x-[-1]" />
               </div>
             </div>
-            {step === 'product_scan' && (
-              <div className="flex justify-center pt-4">
-                <button onClick={captureImage} className="p-8 rounded-full bg-black text-white shadow-2xl active:scale-90 transition-transform"><Camera className="w-8 h-8" /></button>
-              </div>
-            )}
           </div>
         )}
 
@@ -245,14 +340,13 @@ const App: React.FC = () => {
                </div>
                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">{quizStep + 1} / 7</span>
             </div>
-            
-            {quizStep === 0 && <QuizOption dark={settings.darkMode} title="Wie alt bist du?" options={['18-24', '25-34', '35-44', '45+']} selected={quiz.age} onSelect={v => { setQuiz({...quiz, age: v}); setQuizStep(1); }} />}
+            {quizStep === 0 && <QuizOption dark={settings.darkMode} title="Alter?" options={['18-24', '25-34', '35-44', '45+']} selected={quiz.age} onSelect={v => { setQuiz({...quiz, age: v}); setQuizStep(1); }} />}
             {quizStep === 1 && (
-              <div className="space-y-8 animate-in fade-in">
-                <h2 className="text-4xl font-black tracking-tight leading-none">Deine Ziele?</h2>
+              <div className="space-y-8">
+                <h2 className="text-4xl font-black tracking-tight leading-none">Ziele?</h2>
                 <div className="grid grid-cols-2 gap-3">
                   {['Unreinheiten', 'Anti-Aging', 'Glow', 'Poren', 'Trockenheit', 'Augenringe'].map(goal => (
-                    <button key={goal} onClick={() => setQuiz(p => ({...p, concerns: p.concerns.includes(goal) ? p.concerns.filter(c => c !== goal) : [...p.concerns, goal]}))} className={`py-5 rounded-[24px] text-[10px] font-black uppercase tracking-widest transition-all ${quiz.concerns.includes(goal) ? 'bg-black text-white shadow-lg' : 'bg-white border text-zinc-400'}`}>
+                    <button key={goal} onClick={() => setQuiz(p => ({...p, concerns: p.concerns.includes(goal) ? p.concerns.filter(c => c !== goal) : [...p.concerns, goal]}))} className={`py-5 rounded-[24px] text-[10px] font-black uppercase tracking-widest transition-all ${quiz.concerns.includes(goal) ? 'bg-black text-white' : 'bg-white border text-zinc-400'}`}>
                       {goal}
                     </button>
                   ))}
@@ -288,20 +382,14 @@ const App: React.FC = () => {
                   <div className="absolute top-0 left-0 w-full h-1 bg-black shadow-[0_0_20px_black] animate-[analysis-scan_3s_ease-in-out_infinite]"></div>
                   <Loader2 className="w-12 h-12 animate-spin absolute inset-0 m-auto text-zinc-100" />
                 </div>
-                <div className="space-y-2">
-                  <h2 className="text-3xl font-black tracking-tight">{loadingMsg}</h2>
-                  <p className="text-zinc-500 text-sm">Präzise Auswertung durch GlowAI...</p>
-                </div>
+                <h2 className="text-3xl font-black tracking-tight">{loadingMsg}</h2>
               </>
             ) : (
               <div className="space-y-6">
-                <div className="bg-red-50 p-8 rounded-[40px] border border-red-100 flex flex-col items-center gap-4">
-                  <AlertTriangle className="w-16 h-16 text-red-500" />
-                  <h2 className="text-2xl font-black text-red-900">Fehler</h2>
-                  <p className="text-red-700 text-sm leading-relaxed">{errorMsg}</p>
-                </div>
+                <AlertTriangle className="w-16 h-16 text-red-500 mx-auto" />
+                <h2 className="text-2xl font-black">Fehler</h2>
+                <p className="text-red-700 text-sm">{errorMsg}</p>
                 <PrimaryButton dark={settings.darkMode} onClick={handleQuizSubmit}>Erneut versuchen</PrimaryButton>
-                <SecondaryButton dark={settings.darkMode} onClick={() => setStep('welcome')}>Abbrechen</SecondaryButton>
               </div>
             )}
           </div>
@@ -312,45 +400,10 @@ const App: React.FC = () => {
              <div className="text-center pt-8">
                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.4em] mb-4 block">Haut-Score</span>
                <div className="text-[140px] font-black leading-none tracking-tighter">{analysis.overallScore}</div>
-               <p className="bg-white px-8 py-3 rounded-full font-black text-[10px] uppercase tracking-widest inline-block shadow-sm border border-zinc-100">{analysis.skinType}</p>
-             </div>
-             <div className="grid grid-cols-2 gap-4">
-               <MetricCard dark={settings.darkMode} icon={<Droplets />} label="Hydration" value={analysis.hydration} color="bg-blue-500" />
-               <MetricCard dark={settings.darkMode} icon={<Shield />} label="Reinheit" value={analysis.purity} color="bg-green-500" />
+               <p className="bg-white px-8 py-3 rounded-full font-black text-[10px] uppercase tracking-widest inline-block shadow-sm">{analysis.skinType}</p>
              </div>
              <RoutineManager dark={settings.darkMode} analysis={analysis} />
-             <div className="space-y-4">
-                <h3 className="text-2xl font-black px-2 flex items-center gap-3"><Sparkles className="w-6 h-6 text-amber-500" /> AI Insights</h3>
-                {analysis.tips.map((tip, i) => <ExpandableTip dark={settings.darkMode} key={i} index={i+1} tip={tip} />)}
-             </div>
              <PrimaryButton dark={settings.darkMode} onClick={() => setStep('care')}>Dashboard öffnen</PrimaryButton>
-          </div>
-        )}
-
-        {step === 'product_result' && scannedProduct && (
-          <div className="space-y-8 animate-in slide-in-from-bottom-10 duration-700">
-            <div className="relative aspect-square w-full rounded-[48px] overflow-hidden shadow-2xl border-4 border-white">
-              <img src={scannedProduct.imageUrl} className="w-full h-full object-cover" alt={scannedProduct.name} />
-              <div className="absolute top-6 right-6 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full flex items-center gap-2 border border-white/20">
-                <Trophy className="w-4 h-4 text-yellow-500" />
-                <span className="text-white font-black text-lg">{scannedProduct.rating}/10</span>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <h2 className="text-4xl font-black leading-none tracking-tighter">{scannedProduct.name}</h2>
-              <p className={`text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest inline-block shadow-sm ${scannedProduct.suitability === 'Sehr gut' ? 'bg-green-500/10 text-green-500' : 'bg-orange-500/10 text-orange-500'}`}>
-                Eignung: {scannedProduct.suitability}
-              </p>
-            </div>
-            <AppleCard dark={settings.darkMode} className="space-y-4">
-              <h3 className="font-black text-lg">Produkt-Analyse</h3>
-              <p className="text-zinc-500 text-sm leading-relaxed">{scannedProduct.description}</p>
-              <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800">
-                <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">KI-Experten-Meinung:</p>
-                <p className="text-sm font-medium italic">"{scannedProduct.personalReason}"</p>
-              </div>
-            </AppleCard>
-            <PrimaryButton dark={settings.darkMode} onClick={() => setStep('care')}>Zurück zum Dashboard</PrimaryButton>
           </div>
         )}
 
@@ -362,11 +415,11 @@ const App: React.FC = () => {
                  <p className="text-zinc-500 font-bold uppercase text-[10px] tracking-widest">Live Übersicht</p>
                </div>
                <div className="text-right flex flex-col items-end">
-                 <div className="flex items-center gap-1 bg-yellow-500/10 text-yellow-500 px-3 py-1 rounded-full mb-1 border border-yellow-500/10">
+                 <div className="flex items-center gap-1 bg-yellow-500/10 text-yellow-500 px-3 py-1 rounded-full mb-1">
                     <Trophy className="w-3 h-3" />
                     <span className="text-[10px] font-black">{settings.points}</span>
                  </div>
-                 <div className="flex items-center gap-1 bg-orange-500/10 text-orange-500 px-3 py-1 rounded-full border border-orange-500/10">
+                 <div className="flex items-center gap-1 bg-orange-500/10 text-orange-500 px-3 py-1 rounded-full">
                     <Flame className="w-3 h-3" />
                     <span className="text-[10px] font-black">{settings.streak}</span>
                  </div>
@@ -374,12 +427,12 @@ const App: React.FC = () => {
              </div>
              
              <div className="grid grid-cols-2 gap-4">
-                <button onClick={() => setStep('daily_scan')} className="p-8 rounded-[40px] bg-white shadow-xl flex flex-col items-center gap-4 active:scale-95 transition-all group">
-                  <Camera className="w-8 h-8 group-hover:scale-110 transition-transform" />
+                <button onClick={() => setStep('daily_scan')} className="p-8 rounded-[40px] bg-white shadow-xl flex flex-col items-center gap-4 active:scale-95 transition-all">
+                  <Camera className="w-8 h-8" />
                   <span className="text-[10px] font-black uppercase tracking-widest">Face Scan</span>
                 </button>
-                <button onClick={() => setStep('product_scan')} className="p-8 rounded-[40px] bg-black text-white shadow-xl flex flex-col items-center gap-4 active:scale-95 transition-all group">
-                  <Package className="w-8 h-8 group-hover:scale-110 transition-transform" />
+                <button onClick={() => setStep('product_scan')} className="p-8 rounded-[40px] bg-black text-white shadow-xl flex flex-col items-center gap-4 active:scale-95 transition-all">
+                  <Package className="w-8 h-8" />
                   <span className="text-[10px] font-black uppercase tracking-widest">Produkt Scan</span>
                 </button>
              </div>
@@ -389,11 +442,6 @@ const App: React.FC = () => {
                 <SliderItem icon={<Zap className="text-yellow-500" />} label="Stress" value={stressLevel} max={10} min={1} onChange={setStressLevel} dark={settings.darkMode} />
                 <SliderItem icon={<Smile className="text-green-500" />} label="Wohlbefinden" value={skinComfort} max={10} min={1} onChange={setSkinComfort} dark={settings.darkMode} />
              </AppleCard>
-             
-             <div className="grid grid-cols-2 gap-4">
-                <TrackerMini dark={settings.darkMode} icon={<Droplets className="text-blue-400" />} label="Wasser" value={waterAmount} unit="L" onInc={() => setWaterAmount(v => Number((v + 0.25).toFixed(2)))} onDec={() => setWaterAmount(v => Math.max(0, Number((v - 0.25).toFixed(2))))} />
-                <TrackerMini dark={settings.darkMode} icon={<Moon className="text-indigo-400" />} label="Schlaf" value={sleepAmount} unit="h" onInc={() => setSleepAmount(v => v + 0.5)} onDec={() => setSleepAmount(v => Math.max(0, v - 0.5))} />
-             </div>
            </div>
         )}
 
@@ -401,17 +449,24 @@ const App: React.FC = () => {
           <div className="space-y-10 animate-in slide-in-from-right duration-500">
              <div className="flex flex-col items-center pt-8 text-center space-y-4">
                <div className="w-28 h-28 bg-white rounded-[44px] flex items-center justify-center shadow-2xl border-4 border-white overflow-hidden">
-                 <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${settings.userName}`} className="w-full h-full" alt="Avatar" />
+                 <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.email || 'Guest'}`} className="w-full h-full" alt="Avatar" />
                </div>
-               <h2 className="text-3xl font-black tracking-tight">{settings.userName}</h2>
-               <p className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.4em]">{settings.skinTypeGoal}</p>
+               <h2 className="text-3xl font-black tracking-tight">{user?.email?.split('@')[0] || settings.userName}</h2>
              </div>
              <div className="space-y-6">
                 <AppleCard dark={settings.darkMode} className="!p-2">
                    <SettingsItem dark={settings.darkMode} icon={<Bell className="text-blue-500" />} label="Erinnerungen" value={settings.notifications} onToggle={() => setSettings(p => ({...p, notifications: !p.notifications}))} />
                    <SettingsItem dark={settings.darkMode} icon={<Moon className="text-indigo-500" />} label="Dunkelmodus" value={settings.darkMode} onToggle={() => setSettings(p => ({...p, darkMode: !p.darkMode}))} isLast />
                 </AppleCard>
-                <SecondaryButton dark={settings.darkMode} onClick={() => { localStorage.clear(); window.location.reload(); }}>Profil zurücksetzen</SecondaryButton>
+                {user && supabase ? (
+                   <SecondaryButton dark={settings.darkMode} onClick={() => supabase.auth.signOut()}>Ausloggen</SecondaryButton>
+                ) : supabase ? (
+                   <PrimaryButton dark={settings.darkMode} onClick={() => setStep('auth')}>Account verknüpfen</PrimaryButton>
+                ) : (
+                  <div className="p-4 text-center text-xs text-zinc-400">
+                    Cloud-Funktionen sind deaktiviert (Konfiguration fehlt).
+                  </div>
+                )}
              </div>
           </div>
         )}
@@ -435,32 +490,28 @@ const RoutineManager: React.FC<{ analysis: SkinAnalysis, dark: boolean }> = ({ a
     <div className="space-y-4">
       <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-4">Morgenroutine</h4>
       <div className="grid grid-cols-1 gap-3">
-        {analysis.morningRoutine && analysis.morningRoutine.length > 0 ? (
-          analysis.morningRoutine.map((s, i) => <RoutineCard key={i} step={s} dark={dark} />)
-        ) : <p className="text-center text-xs text-zinc-400 py-4">Routine wird generiert...</p>}
+        {analysis.morningRoutine?.map((s, i) => <RoutineCard key={i} step={s} dark={dark} />)}
       </div>
     </div>
     <div className="space-y-4">
       <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-4">Abendroutine</h4>
       <div className="grid grid-cols-1 gap-3">
-        {analysis.eveningRoutine && analysis.eveningRoutine.length > 0 ? (
-          analysis.eveningRoutine.map((s, i) => <RoutineCard key={i} step={s} dark={dark} />)
-        ) : <p className="text-center text-xs text-zinc-400 py-4">Routine wird generiert...</p>}
+        {analysis.eveningRoutine?.map((s, i) => <RoutineCard key={i} step={s} dark={dark} />)}
       </div>
     </div>
   </div>
 );
 
 const RoutineCard: React.FC<{ step: RoutineStep, dark: boolean }> = ({ step, dark }) => (
-  <AppleCard dark={dark} className="!p-0 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+  <AppleCard dark={dark} className="!p-0 overflow-hidden shadow-sm">
     <div className="flex items-center h-24">
-      <div className="w-24 h-full bg-zinc-50 flex-shrink-0 overflow-hidden">
+      <div className="w-24 h-full bg-zinc-50 flex-shrink-0">
         <img src={step.imageUrl || 'https://images.unsplash.com/photo-1620916566398-39f1143ab7be?auto=format&fit=crop&q=80&w=400'} className="w-full h-full object-cover" alt={step.product} />
       </div>
       <div className="p-4 flex-1 min-w-0">
         <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-0.5">{step.action}</p>
         <h5 className="text-sm font-black truncate">{step.product}</h5>
-        <p className="text-[10px] text-zinc-400 line-clamp-1 leading-tight">{step.reason}</p>
+        <p className="text-[10px] text-zinc-400 line-clamp-1">{step.reason}</p>
       </div>
       <ChevronRight className="w-4 h-4 mr-4 text-zinc-200" />
     </div>
