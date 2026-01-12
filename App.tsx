@@ -1,18 +1,12 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, RefreshCcw, CheckCircle2, ChevronRight, Activity, Droplets, Sparkles, Shield, User, Info, Check, Plus, Edit2, Save, Trash2, ArrowRight, ArrowLeft, Heart, BarChart3, TrendingUp, Calendar, Minus, ChevronDown, Download, Upload, Bell, Moon, Sun, Wind, CloudSun, Smile, Frown, Zap, Trophy, Flame, Package, Image as ImageIcon, Loader2, AlertTriangle, LogIn, LogOut, CloudCheck, CloudOff } from 'lucide-react';
+import { Camera, RefreshCcw, CheckCircle2, ChevronRight, Activity, Droplets, Sparkles, Shield, User, Info, Check, Plus, Edit2, Save, Trash2, ArrowRight, ArrowLeft, Heart, BarChart3, TrendingUp, Calendar, Minus, ChevronDown, Download, Upload, Bell, Moon, Sun, Wind, CloudSun, Smile, Frown, Zap, Trophy, Flame, Package, Image as ImageIcon, Loader2, AlertTriangle, LogIn, LogOut, Trash } from 'lucide-react';
 import { AppStep, QuizData, SkinAnalysis, ScanStep, RoutineStep, DailyProgress, UserSettings, WeatherData, ScannedProduct } from './types';
 import { AppleCard, PrimaryButton, SecondaryButton } from './components/AppleCard';
 import { analyzeSkin, getRealtimeWeather, analyzeProduct } from './services/geminiService';
-import { supabase } from './services/supabaseClient';
 
 const App: React.FC = () => {
-  const [step, setStep] = useState<AppStep | 'auth'>('welcome');
-  const [user, setUser] = useState<any>(null);
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  
+  const [step, setStep] = useState<AppStep>('welcome');
   const [loadingMsg, setLoadingMsg] = useState('Analysiere...');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [images, setImages] = useState<{ [key: string]: string }>({});
@@ -42,79 +36,23 @@ const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const progressIntervalRef = useRef<number | null>(null);
 
-  // Auth Listener with null guard for supabase
+  // Persistence: Daten beim Start aus LocalStorage laden
   useEffect(() => {
-    if (!supabase) return;
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) loadUserData(session.user.id);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) loadUserData(session.user.id);
-    });
-
-    return () => subscription.unsubscribe();
+    const savedData = localStorage.getItem('glowai_user_data');
+    if (savedData) {
+      const parsed = JSON.parse(savedData);
+      if (parsed.settings) setSettings(parsed.settings);
+      if (parsed.analysis) setAnalysis(parsed.analysis);
+      if (parsed.settings?.isSetupComplete) setStep('care');
+    }
   }, []);
 
-  const loadUserData = async (userId: string) => {
-    if (!supabase) return;
-    try {
-      // Profile laden
-      const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single();
-      if (profile) {
-        setSettings(prev => ({ ...prev, ...profile, isSetupComplete: true }));
-      }
-      // Letzte Analyse laden
-      const { data: analyses } = await supabase.from('analyses').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(1);
-      if (analyses && analyses.length > 0) {
-        setAnalysis(analyses[0].data);
-      }
-    } catch (e) {
-      console.error("Error loading Supabase data", e);
+  // Persistence: Daten bei Änderungen speichern
+  useEffect(() => {
+    if (settings.isSetupComplete) {
+      localStorage.setItem('glowai_user_data', JSON.stringify({ settings, analysis }));
     }
-  };
-
-  const handleAuth = async () => {
-    if (!supabase) {
-      setErrorMsg("Cloud-Dienste sind aktuell nicht konfiguriert.");
-      return;
-    }
-    setErrorMsg(null);
-    try {
-      if (authMode === 'signup') {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        alert("Bitte bestätige deine Email!");
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        setStep('care');
-      }
-    } catch (e: any) {
-      setErrorMsg(e.message);
-    }
-  };
-
-  const saveAnalysisToCloud = async (analysisData: SkinAnalysis) => {
-    if (!user || !supabase) return;
-    try {
-      await supabase.from('analyses').insert({
-        user_id: user.id,
-        data: analysisData
-      });
-      await supabase.from('profiles').upsert({
-        id: user.id,
-        points: settings.points,
-        streak: settings.streak,
-        user_name: settings.userName
-      });
-    } catch (e) {
-      console.error("Cloud Save failed", e);
-    }
-  };
+  }, [settings, analysis]);
 
   const scanSteps: ScanStep[] = [
     { label: 'Frontal-Ansicht', instruction: 'Gesicht zentriert halten.', id: 'front' },
@@ -199,6 +137,7 @@ const App: React.FC = () => {
         
         if (step === 'daily_scan') {
            setStep('analyzing');
+           setLoadingMsg("Face Check...");
            setTimeout(() => setStep('care'), 1500);
            return;
         }
@@ -238,10 +177,16 @@ const App: React.FC = () => {
       const result = await analyzeSkin(images, quiz, weather || undefined, (msg) => setLoadingMsg(msg));
       setAnalysis(result);
       setSettings(prev => ({...prev, isSetupComplete: true, points: prev.points + 100, streak: prev.streak + 1}));
-      saveAnalysisToCloud(result);
       setStep('result');
     } catch (err: any) { 
       setErrorMsg(err.message || "Analyse fehlgeschlagen.");
+    }
+  };
+
+  const resetData = () => {
+    if (confirm("Möchtest du wirklich alle Daten löschen? Dein Fortschritt geht verloren.")) {
+      localStorage.removeItem('glowai_user_data');
+      window.location.reload();
     }
   };
 
@@ -255,13 +200,9 @@ const App: React.FC = () => {
           <h1 className="text-xl font-black tracking-tight">GlowAI</h1>
         </div>
         {settings.isSetupComplete && (
-           <div className="flex items-center gap-3">
-             {user && <CloudCheck className="w-4 h-4 text-green-500" />}
-             {!supabase && <CloudOff className="w-4 h-4 text-zinc-400" />}
-             <button onClick={() => setStep('profile')} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${settings.darkMode ? 'bg-zinc-800' : 'bg-white'} shadow-sm`}>
-               <User className="w-5 h-5" />
-             </button>
-           </div>
+           <button onClick={() => setStep('profile')} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${settings.darkMode ? 'bg-zinc-800' : 'bg-white'} shadow-sm`}>
+             <User className="w-5 h-5" />
+           </button>
         )}
       </header>
 
@@ -271,42 +212,11 @@ const App: React.FC = () => {
             <div className="relative rounded-[48px] overflow-hidden aspect-[4/5] shadow-2xl group">
               <img src="https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover" alt="Hero" />
               <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent flex flex-col justify-end p-12">
-                <h2 className="text-5xl font-black text-white mb-4 leading-[0.9] tracking-tighter">Deine Haut,<br/><span className="text-zinc-400">{supabase ? 'Cloud gesichert.' : 'KI analysiert.'}</span></h2>
-                <p className="text-white/60 text-lg leading-tight">
-                  {supabase ? 'Analysen & Routinen überall verfügbar dank Supabase.' : 'Personalisiertes Skin-Health Tracking direkt auf deinem Device.'}
-                </p>
+                <h2 className="text-5xl font-black text-white mb-4 leading-[0.9] tracking-tighter">Deine Haut,<br/><span className="text-zinc-400">KI analysiert.</span></h2>
+                <p className="text-white/60 text-lg leading-tight">Personalisiertes Skin-Health Tracking direkt auf deinem Device.</p>
               </div>
             </div>
-            {!user && supabase ? (
-               <PrimaryButton dark={settings.darkMode} onClick={() => setStep('auth')}>Account erstellen</PrimaryButton>
-            ) : (
-               <PrimaryButton dark={settings.darkMode} onClick={() => setStep('scan')}>Neuer 3D Scan</PrimaryButton>
-            )}
-            {!user && <SecondaryButton dark={settings.darkMode} onClick={() => setStep('scan')}>{supabase ? 'Als Gast fortfahren' : 'Starten'}</SecondaryButton>}
-          </div>
-        )}
-
-        {step === 'auth' && (
-          <div className="space-y-8 animate-in slide-in-from-bottom-10 duration-500">
-            <div className="text-center space-y-2">
-              <h2 className="text-3xl font-black tracking-tight">{authMode === 'login' ? 'Willkommen zurück' : 'Neu hier?'}</h2>
-              <p className="text-zinc-500 text-sm">Synchronisiere deine Hautpflegeroutine.</p>
-            </div>
-            <AppleCard dark={settings.darkMode} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest px-1">Email</label>
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={`w-full p-4 rounded-xl border ${settings.darkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-zinc-50 border-zinc-100'}`} placeholder="name@example.com" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest px-1">Passwort</label>
-                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className={`w-full p-4 rounded-xl border ${settings.darkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-zinc-50 border-zinc-100'}`} placeholder="••••••••" />
-              </div>
-              {errorMsg && <p className="text-red-500 text-xs px-1">{errorMsg}</p>}
-              <PrimaryButton dark={settings.darkMode} onClick={handleAuth}>{authMode === 'login' ? 'Einloggen' : 'Konto erstellen'}</PrimaryButton>
-              <button onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')} className="w-full text-center text-xs font-bold text-zinc-400 py-2">
-                {authMode === 'login' ? 'Noch kein Konto? Registrieren' : 'Bereits Mitglied? Login'}
-              </button>
-            </AppleCard>
+            <PrimaryButton dark={settings.darkMode} onClick={() => setStep('scan')}>3D Scan starten</PrimaryButton>
           </div>
         )}
 
@@ -317,7 +227,7 @@ const App: React.FC = () => {
                 {step === 'daily_scan' ? 'Face Check' : step === 'product_scan' ? 'Produkt Scan' : scanSteps[scanIndex].label}
               </h2>
               <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.2em] animate-pulse">
-                {scanSteps[scanIndex].instruction}
+                {step === 'product_scan' ? 'Positioniere das Produkt im Fokus' : scanSteps[scanIndex].instruction}
               </p>
             </div>
             <div className="relative aspect-square w-full max-w-[320px] mx-auto">
@@ -329,6 +239,11 @@ const App: React.FC = () => {
                 <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover scale-x-[-1]" />
               </div>
             </div>
+            {step === 'product_scan' && (
+              <div className="pt-6">
+                <PrimaryButton dark={settings.darkMode} onClick={captureImage} className="w-auto px-12 mx-auto">Scannen</PrimaryButton>
+              </div>
+            )}
           </div>
         )}
 
@@ -346,7 +261,7 @@ const App: React.FC = () => {
                 <h2 className="text-4xl font-black tracking-tight leading-none">Ziele?</h2>
                 <div className="grid grid-cols-2 gap-3">
                   {['Unreinheiten', 'Anti-Aging', 'Glow', 'Poren', 'Trockenheit', 'Augenringe'].map(goal => (
-                    <button key={goal} onClick={() => setQuiz(p => ({...p, concerns: p.concerns.includes(goal) ? p.concerns.filter(c => c !== goal) : [...p.concerns, goal]}))} className={`py-5 rounded-[24px] text-[10px] font-black uppercase tracking-widest transition-all ${quiz.concerns.includes(goal) ? 'bg-black text-white' : 'bg-white border text-zinc-400'}`}>
+                    <button key={goal} onClick={() => setQuiz(p => ({...p, concerns: p.concerns.includes(goal) ? p.concerns.filter(c => c !== goal) : [...p.concerns, goal]}))} className={`py-5 rounded-[24px] text-[10px] font-black uppercase tracking-widest transition-all ${quiz.concerns.includes(goal) ? 'bg-black text-white shadow-lg' : 'bg-white border text-zinc-400'}`}>
                       {goal}
                     </button>
                   ))}
@@ -442,31 +357,56 @@ const App: React.FC = () => {
                 <SliderItem icon={<Zap className="text-yellow-500" />} label="Stress" value={stressLevel} max={10} min={1} onChange={setStressLevel} dark={settings.darkMode} />
                 <SliderItem icon={<Smile className="text-green-500" />} label="Wohlbefinden" value={skinComfort} max={10} min={1} onChange={setSkinComfort} dark={settings.darkMode} />
              </AppleCard>
+
+             <div className="grid grid-cols-2 gap-4">
+                <TrackerMini dark={settings.darkMode} icon={<Droplets className="text-blue-400" />} label="Wasser" value={waterAmount} unit="L" onInc={() => setWaterAmount(v => Number((v + 0.25).toFixed(2)))} onDec={() => setWaterAmount(v => Math.max(0, Number((v - 0.25).toFixed(2))))} />
+                <TrackerMini dark={settings.darkMode} icon={<Moon className="text-indigo-400" />} label="Schlaf" value={sleepAmount} unit="h" onInc={() => setSleepAmount(v => v + 0.5)} onDec={() => setSleepAmount(v => Math.max(0, v - 0.5))} />
+             </div>
            </div>
+        )}
+
+        {step === 'product_result' && scannedProduct && (
+          <div className="space-y-8 animate-in slide-in-from-bottom-10 duration-700">
+            <div className="relative aspect-square w-full rounded-[48px] overflow-hidden shadow-2xl border-4 border-white">
+              <img src={scannedProduct.imageUrl} className="w-full h-full object-cover" alt={scannedProduct.name} />
+              <div className="absolute top-6 right-6 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full flex items-center gap-2 border border-white/20">
+                <Trophy className="w-4 h-4 text-yellow-500" />
+                <span className="text-white font-black text-lg">{scannedProduct.rating}/10</span>
+              </div>
+            </div>
+            <div className="space-y-2 text-center">
+              <h2 className="text-4xl font-black leading-none tracking-tighter">{scannedProduct.name}</h2>
+              <p className={`text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest inline-block shadow-sm ${scannedProduct.suitability === 'Sehr gut' ? 'bg-green-500/10 text-green-500' : 'bg-orange-500/10 text-orange-500'}`}>
+                {scannedProduct.suitability}
+              </p>
+            </div>
+            <AppleCard dark={settings.darkMode} className="space-y-4">
+              <h3 className="font-black text-lg">KI-Bewertung</h3>
+              <p className="text-zinc-500 text-sm leading-relaxed">{scannedProduct.personalReason}</p>
+            </AppleCard>
+            <PrimaryButton dark={settings.darkMode} onClick={() => setStep('care')}>Zurück zum Dashboard</PrimaryButton>
+          </div>
         )}
 
         {step === 'profile' && (
           <div className="space-y-10 animate-in slide-in-from-right duration-500">
              <div className="flex flex-col items-center pt-8 text-center space-y-4">
                <div className="w-28 h-28 bg-white rounded-[44px] flex items-center justify-center shadow-2xl border-4 border-white overflow-hidden">
-                 <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.email || 'Guest'}`} className="w-full h-full" alt="Avatar" />
+                 <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${settings.userName}`} className="w-full h-full" alt="Avatar" />
                </div>
-               <h2 className="text-3xl font-black tracking-tight">{user?.email?.split('@')[0] || settings.userName}</h2>
+               <h2 className="text-3xl font-black tracking-tight">{settings.userName}</h2>
+               <p className="text-xs text-zinc-400 font-bold uppercase tracking-widest">{settings.skinTypeGoal}</p>
              </div>
              <div className="space-y-6">
                 <AppleCard dark={settings.darkMode} className="!p-2">
                    <SettingsItem dark={settings.darkMode} icon={<Bell className="text-blue-500" />} label="Erinnerungen" value={settings.notifications} onToggle={() => setSettings(p => ({...p, notifications: !p.notifications}))} />
                    <SettingsItem dark={settings.darkMode} icon={<Moon className="text-indigo-500" />} label="Dunkelmodus" value={settings.darkMode} onToggle={() => setSettings(p => ({...p, darkMode: !p.darkMode}))} isLast />
                 </AppleCard>
-                {user && supabase ? (
-                   <SecondaryButton dark={settings.darkMode} onClick={() => supabase.auth.signOut()}>Ausloggen</SecondaryButton>
-                ) : supabase ? (
-                   <PrimaryButton dark={settings.darkMode} onClick={() => setStep('auth')}>Account verknüpfen</PrimaryButton>
-                ) : (
-                  <div className="p-4 text-center text-xs text-zinc-400">
-                    Cloud-Funktionen sind deaktiviert (Konfiguration fehlt).
-                  </div>
-                )}
+                <div className="pt-8">
+                  <SecondaryButton dark={settings.darkMode} onClick={resetData} className="!bg-red-50 !text-red-500 flex items-center justify-center gap-2">
+                    <Trash className="w-4 h-4" /> Daten zurücksetzen
+                  </SecondaryButton>
+                </div>
              </div>
           </div>
         )}
@@ -531,16 +471,6 @@ const QuizOption: React.FC<{ title: string, options: string[], selected: string,
   </div>
 );
 
-const MetricCard: React.FC<{ icon: React.ReactNode, label: string, value: number, color: string, dark: boolean }> = ({ icon, label, value, color, dark }) => (
-  <AppleCard dark={dark} className="p-6 flex flex-col items-center gap-4 border-none shadow-md">
-    <div className={`p-4 rounded-3xl ${dark ? 'bg-zinc-800' : 'bg-zinc-50'}`}>{React.cloneElement(icon as React.ReactElement, { className: `w-7 h-7 ${color.replace('bg-', 'text-')}` })}</div>
-    <div className="text-center">
-      <span className="text-[9px] text-zinc-400 font-black uppercase tracking-widest block mb-1">{label}</span>
-      <span className="text-3xl font-black tracking-tighter">{value}%</span>
-    </div>
-  </AppleCard>
-);
-
 const TrackerMini: React.FC<{ icon: React.ReactNode, label: string, value: number, unit: string, onInc: () => void, onDec: () => void, dark: boolean }> = ({ icon, label, value, unit, onInc, onDec, dark }) => (
   <AppleCard dark={dark} className="!p-5 flex flex-col gap-4 border-none shadow-md">
     <div className="flex items-center gap-2">
@@ -567,26 +497,6 @@ const SliderItem: React.FC<{ icon: React.ReactNode, label: string, value: number
     <input type="range" min={min} max={max} value={value} onChange={(e) => onChange(parseInt(e.target.value))} className="w-full h-1.5 bg-zinc-100 rounded-full appearance-none accent-black cursor-pointer" />
   </div>
 );
-
-const ExpandableTip: React.FC<{ index: number, tip: string, dark: boolean }> = ({ index, tip, dark }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  return (
-    <AppleCard dark={dark} className="!p-0 overflow-hidden shadow-sm border-none">
-      <button onClick={() => setIsOpen(!isOpen)} className="w-full p-6 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-           <div className={`w-10 h-10 rounded-xl ${dark ? 'bg-white text-black' : 'bg-black text-white'} flex items-center justify-center font-black text-sm`}>{index}</div>
-           <p className="text-sm font-black text-left truncate max-w-[180px]">{tip.split('.')[0]}</p>
-        </div>
-        <ChevronDown className={`w-5 h-5 transition-transform duration-500 ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
-      {isOpen && (
-        <div className="p-6 pt-0 animate-in fade-in slide-in-from-top-2">
-          <div className={`p-4 rounded-2xl ${dark ? 'bg-zinc-800' : 'bg-zinc-50'} text-xs leading-relaxed text-zinc-500 font-medium`}>{tip}</div>
-        </div>
-      )}
-    </AppleCard>
-  );
-};
 
 const SettingsItem: React.FC<{ icon: React.ReactNode, label: string, value: boolean, onToggle: () => void, isLast?: boolean, dark: boolean }> = ({ icon, label, value, onToggle, isLast, dark }) => (
   <div className={`flex items-center justify-between p-5 ${!isLast ? (dark ? 'border-b border-zinc-800' : 'border-b border-zinc-100') : ''}`}>
