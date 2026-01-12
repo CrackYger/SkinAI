@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, RefreshCcw, CheckCircle2, ChevronRight, Activity, Droplets, Sparkles, Shield, User, Info, Check, Plus, Edit2, Save, Trash2, ArrowRight, ArrowLeft, Heart, BarChart3, TrendingUp, Calendar, Minus, ChevronDown, Download, Upload, Bell, Moon, Sun, Wind, CloudSun, Smile, Frown, Zap, Trophy, Flame, Package, Image as ImageIcon, Loader2, AlertTriangle, Trash } from 'lucide-react';
+import { Camera, RefreshCcw, CheckCircle2, ChevronRight, Activity, Droplets, Sparkles, Shield, User, Info, Check, Plus, Edit2, Save, Trash2, ArrowRight, ArrowLeft, Heart, BarChart3, TrendingUp, Calendar, Minus, ChevronDown, Download, Upload, Bell, Moon, Sun, Wind, CloudSun, Smile, Frown, Zap, Trophy, Flame, Package, Image as ImageIcon, Loader2, AlertTriangle, Trash, HardDrive } from 'lucide-react';
 import { AppStep, QuizData, SkinAnalysis, ScanStep, RoutineStep, DailyProgress, UserSettings, WeatherData, ScannedProduct } from './types';
 import { AppleCard, PrimaryButton, SecondaryButton } from './components/AppleCard';
 import { analyzeSkin, getRealtimeWeather, analyzeProduct } from './services/geminiService';
@@ -36,7 +36,7 @@ const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const progressIntervalRef = useRef<number | null>(null);
 
-  // Laden der Daten aus LocalStorage beim Start
+  // Persistence: Restore from LocalStorage
   useEffect(() => {
     const saved = localStorage.getItem('glow_skincare_data');
     if (saved) {
@@ -45,14 +45,35 @@ const App: React.FC = () => {
         if (s) setSettings(s);
         if (a) setAnalysis(a);
         if (s?.isSetupComplete) setStep('care');
-      } catch (e) { console.error("Restore failed", e); }
+      } catch (e) { 
+        console.error("Restore failed", e);
+      }
     }
   }, []);
 
-  // Automatisches Speichern bei Änderungen
+  // Persistence: Save to LocalStorage (with size optimization)
   useEffect(() => {
     if (settings.isSetupComplete) {
-      localStorage.setItem('glow_skincare_data', JSON.stringify({ settings, analysis }));
+      try {
+        // Strip out heavy base64 images from analysis before saving to stay under 5MB quota
+        const leanAnalysis = analysis ? {
+          ...analysis,
+          morningRoutine: analysis.morningRoutine.map(step => ({ ...step, imageUrl: undefined })),
+          eveningRoutine: analysis.eveningRoutine.map(step => ({ ...step, imageUrl: undefined })),
+        } : null;
+
+        const dataToSave = JSON.stringify({ settings, analysis: leanAnalysis });
+        localStorage.setItem('glow_skincare_data', dataToSave);
+      } catch (e) {
+        if (e instanceof DOMException && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
+          console.warn("LocalStorage full, attempt to save without analysis results.");
+          try {
+            localStorage.setItem('glow_skincare_data', JSON.stringify({ settings, analysis: null }));
+          } catch (innerErr) {
+            console.error("Even minimal save failed", innerErr);
+          }
+        }
+      }
     }
   }, [settings, analysis]);
 
@@ -135,7 +156,7 @@ const App: React.FC = () => {
         canvasRef.current.width = videoRef.current.videoWidth;
         canvasRef.current.height = videoRef.current.videoHeight;
         context.drawImage(videoRef.current, 0, 0);
-        const dataUrl = canvasRef.current.toDataURL('image/jpeg');
+        const dataUrl = canvasRef.current.toDataURL('image/jpeg', 0.8);
         
         if (step === 'daily_scan') {
            setStep('analyzing');
@@ -432,7 +453,17 @@ const App: React.FC = () => {
              <div className="space-y-6">
                 <AppleCard dark={settings.darkMode} className="!p-0 overflow-hidden">
                    <SettingsItem dark={settings.darkMode} icon={<Bell className="text-blue-500" />} label="Push-Erinnerungen" value={settings.notifications} onToggle={() => setSettings(p => ({...p, notifications: !p.notifications}))} />
-                   <SettingsItem dark={settings.darkMode} icon={<Moon className="text-indigo-500" />} label="Dark Appearance" value={settings.darkMode} onToggle={() => setSettings(p => ({...p, darkMode: !p.darkMode}))} isLast />
+                   <SettingsItem dark={settings.darkMode} icon={<Moon className="text-indigo-500" />} label="Dark Appearance" value={settings.darkMode} onToggle={() => setSettings(p => ({...p, darkMode: !p.darkMode}))} />
+                   <div className={`flex items-center justify-between p-7 ${settings.darkMode ? 'border-t border-white/5' : 'border-t border-zinc-50'}`}>
+                    <div className="flex items-center gap-5">
+                      <div className={`w-12 h-12 rounded-2xl ${settings.darkMode ? 'bg-zinc-800' : 'bg-zinc-50'} flex items-center justify-center`}><HardDrive className="text-zinc-400 w-5 h-5" /></div>
+                      <div>
+                        <span className="text-base font-black tracking-tight block">Lokaler Speicher</span>
+                        <span className="text-[10px] text-zinc-400 uppercase font-black">Optimiert & Lean</span>
+                      </div>
+                    </div>
+                    <CheckCircle2 className="text-green-500 w-5 h-5" />
+                   </div>
                 </AppleCard>
                 <div className="pt-10">
                   <SecondaryButton dark={settings.darkMode} onClick={resetAll} className="!bg-red-50 !text-red-500 flex items-center justify-center gap-3 border border-red-100">
@@ -445,7 +476,7 @@ const App: React.FC = () => {
       </div>
 
       <footer className={`fixed bottom-0 left-0 right-0 max-w-md mx-auto p-6 transition-all duration-700 ${!settings.isSetupComplete ? 'opacity-0 translate-y-10 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
-        <div className={`${settings.darkMode ? 'bg-zinc-900/80 border-white/5' : 'bg-white/80 border-zinc-100'} backdrop-blur-2xl border flex justify-around p-3 rounded-[36px] shadow-2xl z-50`}>
+        <div className={`${settings.darkMode ? 'bg-zinc-900/80 border-white/5' : 'bg-white/80 border-zinc-100'} apple-blur border flex justify-around p-3 rounded-[36px] shadow-2xl z-50`}>
           <NavButton dark={settings.darkMode} icon={<BarChart3 />} label="Health" active={step === 'care'} onClick={() => setStep('care')} />
           <NavButton dark={settings.darkMode} icon={<Shield />} label="Routine" active={step === 'result'} onClick={() => setStep('result')} />
           <NavButton dark={settings.darkMode} icon={<Activity />} label="Scan" active={['scan', 'daily_scan', 'product_scan'].includes(step)} onClick={() => setStep('daily_scan')} />
