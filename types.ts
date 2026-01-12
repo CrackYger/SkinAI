@@ -1,12 +1,26 @@
 
+export interface SkinIssue {
+  x: number; // 0-100 percentage from left
+  y: number; // 0-100 percentage from top
+  type: 'acne' | 'sebum' | 'sunDamage' | 'wrinkles';
+  severity: number; // 0-1
+}
+
 export interface SkinAnalysis {
   overallScore: number;
   hydration: number;
   texture: number;
   purity: number;
   antiAging: number;
+  // New specific metrics
+  acneScore: number;
+  sebumScore: number;
+  sunDamageScore: number;
+  
   skinType: string;
   summary: string;
+  detectedIssues: SkinIssue[]; // Coordinates for visual overlay
+  
   morningRoutine: RoutineStep[];
   eveningRoutine: RoutineStep[];
   tips: string[];
@@ -17,6 +31,28 @@ export interface RoutineStep {
   action: string;
   reason: string;
   imageUrl?: string;
+  isCustom?: boolean; // Markiert vom Nutzer hinzugefügte Produkte
+}
+
+export interface RoutineAnalysis {
+  score: number;
+  summary: string;
+  warnings: {
+    product: string;
+    issue: string;
+    severity: 'high' | 'medium' | 'low';
+  }[];
+  alternatives: {
+    badProduct: string;
+    betterAlternative: string;
+    reason: string;
+  }[];
+}
+
+export interface ProductSearchResult {
+  name: string;
+  brand: string;
+  type: string;
 }
 
 export interface ScannedProduct {
@@ -56,7 +92,7 @@ export interface UserSettings {
   streak: number;
 }
 
-export type AppStep = 'welcome' | 'scan' | 'quiz' | 'analyzing' | 'result' | 'care' | 'profile' | 'daily_scan' | 'product_scan' | 'product_result' | 'scan_hub';
+export type AppStep = 'welcome' | 'scan' | 'quiz' | 'analyzing' | 'result' | 'care' | 'profile' | 'daily_scan' | 'product_scan' | 'product_result' | 'scan_hub' | 'add_product';
 
 export interface ScanStep {
   label: string;

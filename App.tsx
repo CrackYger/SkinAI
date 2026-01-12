@@ -1,9 +1,9 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, CheckCircle2, ChevronRight, ChevronDown, Activity, Droplets, Sparkles, Shield, User, Plus, Minus, Package, Loader2, AlertTriangle, Trash, HardDrive, Bell, Moon, Zap, Smile, Trophy, Flame, Scan, Heart, Wand2, Info, Download, Upload, BarChart3, Clock } from 'lucide-react';
-import { AppStep, QuizData, SkinAnalysis, ScanStep, RoutineStep, UserSettings, WeatherData, ScannedProduct } from './types';
+import { Camera, CheckCircle2, ChevronRight, ChevronDown, Activity, Droplets, Sparkles, Shield, User, Plus, Minus, Package, Loader2, AlertTriangle, Trash, HardDrive, Bell, Moon, Zap, Smile, Trophy, Flame, Scan, Heart, Wand2, Info, Download, Upload, BarChart3, Clock, Search, X, AlertOctagon, RefreshCw, ArrowRight, Eye, Sun } from 'lucide-react';
+import { AppStep, QuizData, SkinAnalysis, ScanStep, RoutineStep, UserSettings, WeatherData, ScannedProduct, ProductSearchResult, RoutineAnalysis } from './types';
 import { AppleCard, PrimaryButton, SecondaryButton } from './components/AppleCard';
-import { analyzeSkin, getRealtimeWeather, analyzeProduct } from './services/geminiService';
+import { analyzeSkin, getRealtimeWeather, analyzeProduct, findProducts, generateProductImage, analyzeFullRoutine } from './services/geminiService';
 
 const App: React.FC = () => {
   const [step, setStep] = useState<AppStep>('welcome');
@@ -25,6 +25,17 @@ const App: React.FC = () => {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [scannedProduct, setScannedProduct] = useState<ScannedProduct | null>(null);
   
+  // Routine Edit State
+  const [activeRoutineTime, setActiveRoutineTime] = useState<'morning' | 'evening' | null>(null);
+  const [productSearchQuery, setProductSearchQuery] = useState('');
+  const [productSearchResults, setProductSearchResults] = useState<ProductSearchResult[]>([]);
+  const [isSearchingProduct, setIsSearchingProduct] = useState(false);
+  const [routineAnalysisResult, setRoutineAnalysisResult] = useState<RoutineAnalysis | null>(null);
+  const [isAnalyzingRoutine, setIsAnalyzingRoutine] = useState(false);
+
+  // Visual Analysis Layers
+  const [activeLayer, setActiveLayer] = useState<'acne' | 'sebum' | 'sunDamage' | null>(null);
+
   const [waterAmount, setWaterAmount] = useState(1.5);
   const [sleepAmount, setSleepAmount] = useState(7.5);
   const [stressLevel, setStressLevel] = useState(3);
@@ -55,7 +66,7 @@ const App: React.FC = () => {
         const parsed = JSON.parse(saved);
         if (parsed.settings) setSettings(parsed.settings);
         if (parsed.analysis) setAnalysis(parsed.analysis);
-        if (parsed.settings?.isSetupComplete) setStep('care');
+        if (parsed.settings?.isSetupComplete && step === 'welcome') setStep('care');
       } catch (e) { console.error("Restore failed", e); }
     }
   }, []);
@@ -64,8 +75,8 @@ const App: React.FC = () => {
     if (settings.isSetupComplete) {
       const leanAnalysis = analysis ? {
         ...analysis,
-        morningRoutine: analysis.morningRoutine?.map(s => ({ ...s, imageUrl: undefined })) || [],
-        eveningRoutine: analysis.eveningRoutine?.map(s => ({ ...s, imageUrl: undefined })) || [],
+        // We do NOT remove imageUrls anymore to keep custom added product images if possible
+        // but for huge strings we might need optimization. For now keep it.
       } : null;
       localStorage.setItem('glowai_v2_data', JSON.stringify({ settings, analysis: leanAnalysis }));
     }
@@ -174,6 +185,16 @@ const App: React.FC = () => {
           try {
             const res = await analyzeProduct(dataUrl, quiz);
             setScannedProduct(res);
+            
+            // If we came from adding a product to routine
+            if (activeRoutineTime) {
+              addProductToRoutine(res.name, activeRoutineTime, res.rating, res.imageUrl);
+              setStep('care');
+              setScannedProduct(null);
+              setActiveRoutineTime(null);
+              return;
+            }
+
             setStep('product_result');
           } catch (e: any) {
             setErrorMsg(e.message === "API_KEY_MISSING" ? "API Key fehlt." : "Analyse fehlgeschlagen.");
@@ -232,6 +253,56 @@ const App: React.FC = () => {
       clearInterval(interval);
       setErrorMsg(err.message === "API_KEY_MISSING" ? "API Key erforderlich." : "Analyse-Fehler. Die KI konnte die Bilder nicht verarbeiten. Bitte erneut versuchen.");
     }
+  };
+
+  // Routine Editing Functions
+  const handleRemoveProduct = (index: number, time: 'morning' | 'evening') => {
+    if (!analysis) return;
+    const newAnalysis = { ...analysis };
+    if (time === 'morning') newAnalysis.morningRoutine.splice(index, 1);
+    else newAnalysis.eveningRoutine.splice(index, 1);
+    setAnalysis(newAnalysis);
+  };
+
+  const handleSearchProducts = async () => {
+    if (!productSearchQuery.trim()) return;
+    setIsSearchingProduct(true);
+    const results = await findProducts(productSearchQuery);
+    setProductSearchResults(results);
+    setIsSearchingProduct(false);
+  };
+
+  const addProductToRoutine = async (name: string, time: 'morning' | 'evening', rating?: number, imgUrl?: string) => {
+    if (!analysis) return;
+    
+    // Generate placeholder or real image if not provided
+    const image = imgUrl || await generateProductImage(name);
+    
+    const newStep: RoutineStep = {
+      product: name,
+      action: "Anwenden",
+      reason: rating ? `Gescannter Score: ${rating}/10` : "Manuell hinzugefügt",
+      imageUrl: image,
+      isCustom: true
+    };
+
+    const newAnalysis = { ...analysis };
+    if (time === 'morning') newAnalysis.morningRoutine.push(newStep);
+    else newAnalysis.eveningRoutine.push(newStep);
+    
+    setAnalysis(newAnalysis);
+    setStep('care');
+    setActiveRoutineTime(null);
+    setProductSearchQuery('');
+    setProductSearchResults([]);
+  };
+
+  const triggerRoutineAnalysis = async () => {
+    if (!analysis) return;
+    setIsAnalyzingRoutine(true);
+    const result = await analyzeFullRoutine(analysis.morningRoutine, analysis.eveningRoutine, quiz);
+    setRoutineAnalysisResult(result);
+    setIsAnalyzingRoutine(false);
   };
 
   const exportData = () => {
@@ -479,20 +550,169 @@ const App: React.FC = () => {
 
         {step === 'result' && analysis && (
           <div className="space-y-10 animate-in fade-in duration-700">
-             <div className="text-center pt-6">
-               <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest block mb-2">Diagnose Score</span>
-               <div className="text-9xl font-black tracking-tighter transition-all duration-700">{analysis.overallScore}</div>
-               <div className={`${settings.darkMode ? 'bg-white text-black' : 'bg-black text-white'} px-8 py-2 rounded-full font-black text-[10px] uppercase inline-block mt-4`}>{analysis.skinType}</div>
-             </div>
              
+             {/* New Interactive Visual Analysis */}
+             <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <h2 className="text-2xl font-black">Detail Analyse</h2>
+                  <span className="text-[10px] uppercase font-bold text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded-lg">Interaktiv</span>
+                </div>
+
+                {/* Face Map Container */}
+                <div className={`relative aspect-square w-full rounded-[48px] overflow-hidden shadow-2xl border-4 ${settings.darkMode ? 'border-zinc-800' : 'border-white'}`}>
+                   {/* User Image */}
+                   {images['front'] ? (
+                     <img src={images['front']} className="w-full h-full object-cover scale-x-[-1]" alt="Face Analysis" />
+                   ) : (
+                     <div className="w-full h-full bg-zinc-200 flex items-center justify-center">Kein Bild</div>
+                   )}
+                   
+                   {/* Overlay Points */}
+                   {analysis.detectedIssues?.filter(i => activeLayer === null || i.type === activeLayer).map((issue, idx) => (
+                      <div 
+                        key={idx}
+                        className={`absolute w-4 h-4 rounded-full border-2 border-white shadow-lg animate-pulse-glow transition-all duration-300 transform -translate-x-1/2 -translate-y-1/2`}
+                        style={{ 
+                          left: `${issue.x}%`, 
+                          top: `${issue.y}%`,
+                          backgroundColor: issue.type === 'acne' ? '#ef4444' : issue.type === 'sebum' ? '#eab308' : '#f97316'
+                        }}
+                      />
+                   ))}
+
+                   {/* Controls */}
+                   <div className="absolute bottom-4 left-4 right-4 flex justify-between gap-2">
+                      <button onClick={() => setActiveLayer(activeLayer === 'acne' ? null : 'acne')} className={`flex-1 py-3 rounded-2xl backdrop-blur-md text-[10px] font-black uppercase transition-all ${activeLayer === 'acne' ? 'bg-red-500 text-white' : 'bg-white/80 text-black'}`}>Akne</button>
+                      <button onClick={() => setActiveLayer(activeLayer === 'sebum' ? null : 'sebum')} className={`flex-1 py-3 rounded-2xl backdrop-blur-md text-[10px] font-black uppercase transition-all ${activeLayer === 'sebum' ? 'bg-yellow-500 text-white' : 'bg-white/80 text-black'}`}>Talg</button>
+                      <button onClick={() => setActiveLayer(activeLayer === 'sunDamage' ? null : 'sunDamage')} className={`flex-1 py-3 rounded-2xl backdrop-blur-md text-[10px] font-black uppercase transition-all ${activeLayer === 'sunDamage' ? 'bg-orange-500 text-white' : 'bg-white/80 text-black'}`}>Sonne</button>
+                   </div>
+                </div>
+
+                {/* Metric Bars */}
+                <div className="grid grid-cols-3 gap-3">
+                   <MetricCard label="Unreinheit" value={100 - (analysis.acneScore || 50)} color="red" dark={settings.darkMode} />
+                   <MetricCard label="Talg" value={100 - (analysis.sebumScore || 50)} color="yellow" dark={settings.darkMode} />
+                   <MetricCard label="Schäden" value={100 - (analysis.sunDamageScore || 50)} color="orange" dark={settings.darkMode} />
+                </div>
+             </div>
+
              <AppleCard dark={settings.darkMode} className="!bg-black text-white border-none">
                 <h4 className="font-black text-xs uppercase tracking-widest mb-3 opacity-60">Ehrliches Fazit</h4>
                 <p className="text-sm font-medium leading-relaxed italic opacity-90">"{analysis.summary}"</p>
              </AppleCard>
 
-             <RoutineManager dark={settings.darkMode} analysis={analysis} />
-             <PrimaryButton dark={settings.darkMode} onClick={() => setStep('care')}>Mein Dashboard</PrimaryButton>
+             {/* Routine Plan - Now visible here */}
+             <div className="pt-4 border-t border-dashed border-zinc-200 dark:border-zinc-800">
+               <h2 className="text-2xl font-black mb-6">Dein Pflegeplan</h2>
+               <RoutineManager 
+                 dark={settings.darkMode} 
+                 analysis={analysis} 
+                 onAdd={(time) => { setActiveRoutineTime(time); setStep('add_product'); }}
+                 onRemove={handleRemoveProduct}
+                 onAnalyze={triggerRoutineAnalysis}
+               />
+             </div>
+
+             <PrimaryButton dark={settings.darkMode} onClick={() => setStep('care')}>Zum Health Dashboard</PrimaryButton>
           </div>
+        )}
+
+        {step === 'add_product' && (
+          <div className="space-y-6 animate-in slide-in-from-bottom-full duration-300 min-h-[60vh]">
+             <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-black">Produkt hinzufügen</h2>
+                <button onClick={() => { setActiveRoutineTime(null); setStep('care'); }} className="p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800"><X className="w-6 h-6" /></button>
+             </div>
+             
+             <div className="flex gap-4">
+                <button onClick={() => setStep('product_scan')} className={`flex-1 py-8 rounded-3xl border flex flex-col items-center gap-3 active:scale-95 transition-all ${settings.darkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white'}`}>
+                  <Scan className="w-8 h-8 text-blue-500" />
+                  <span className="font-bold text-sm">Scannen</span>
+                </button>
+             </div>
+
+             <div className="space-y-4">
+               <h3 className="font-bold text-sm ml-2">Suche</h3>
+               <div className="flex gap-2">
+                 <div className={`flex-1 flex items-center px-4 rounded-2xl border ${settings.darkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-zinc-200'}`}>
+                   <Search className="w-5 h-5 text-zinc-400" />
+                   <input 
+                     value={productSearchQuery}
+                     onChange={(e) => setProductSearchQuery(e.target.value)}
+                     onKeyDown={(e) => e.key === 'Enter' && handleSearchProducts()}
+                     placeholder="Produktname..." 
+                     className="w-full bg-transparent border-none p-4 focus:outline-none"
+                   />
+                 </div>
+                 <button onClick={handleSearchProducts} className="bg-black text-white dark:bg-white dark:text-black w-14 rounded-2xl flex items-center justify-center">
+                   {isSearchingProduct ? <Loader2 className="animate-spin w-5 h-5" /> : <ArrowRight className="w-5 h-5" />}
+                 </button>
+               </div>
+
+               <div className="space-y-3 mt-4">
+                 {productSearchResults.map((prod, i) => (
+                   <div key={i} onClick={() => activeRoutineTime && addProductToRoutine(prod.name, activeRoutineTime)} className={`p-4 rounded-2xl border flex items-center justify-between active:scale-95 transition-all cursor-pointer ${settings.darkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-zinc-100'}`}>
+                      <div>
+                        <div className="text-[10px] font-bold text-zinc-400 uppercase">{prod.brand}</div>
+                        <div className="font-bold">{prod.name}</div>
+                      </div>
+                      <Plus className="w-5 h-5 text-zinc-400" />
+                   </div>
+                 ))}
+               </div>
+             </div>
+          </div>
+        )}
+
+        {routineAnalysisResult && (
+           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+             <div className={`w-full max-w-md max-h-[85vh] overflow-y-auto p-8 rounded-[48px] shadow-2xl space-y-8 animate-in slide-in-from-bottom-10 ${settings.darkMode ? 'bg-zinc-950 text-white' : 'bg-white text-zinc-900'}`}>
+                <div className="flex items-center justify-between">
+                   <h2 className="text-3xl font-black">Routine Check</h2>
+                   <button onClick={() => setRoutineAnalysisResult(null)} className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-full"><X className="w-5 h-5" /></button>
+                </div>
+
+                <div className="flex items-center gap-6">
+                  <div className={`w-24 h-24 rounded-full flex items-center justify-center text-3xl font-black border-4 ${routineAnalysisResult.score > 80 ? 'border-green-500 text-green-500' : 'border-orange-500 text-orange-500'}`}>
+                    {routineAnalysisResult.score}
+                  </div>
+                  <p className="text-sm font-medium leading-relaxed opacity-80">{routineAnalysisResult.summary}</p>
+                </div>
+
+                {routineAnalysisResult.warnings.length > 0 && (
+                  <div className="space-y-4">
+                    <h3 className="font-black text-sm uppercase tracking-widest text-red-500">Konflikte & Warnungen</h3>
+                    {routineAnalysisResult.warnings.map((w, i) => (
+                      <div key={i} className={`p-4 rounded-2xl border border-red-500/20 bg-red-500/5 flex gap-4`}>
+                        <AlertOctagon className="w-6 h-6 text-red-500 shrink-0" />
+                        <div>
+                          <div className="font-bold text-red-500">{w.product}</div>
+                          <p className="text-xs opacity-80 mt-1">{w.issue}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {routineAnalysisResult.alternatives.length > 0 && (
+                  <div className="space-y-4">
+                    <h3 className="font-black text-sm uppercase tracking-widest text-green-500">Bessere Alternativen</h3>
+                    {routineAnalysisResult.alternatives.map((a, i) => (
+                      <div key={i} className={`p-4 rounded-2xl border border-green-500/20 bg-green-500/5`}>
+                         <div className="flex items-center gap-2 mb-2">
+                           <span className="line-through opacity-50 text-xs">{a.badProduct}</span>
+                           <ArrowRight className="w-3 h-3" />
+                           <span className="font-bold text-green-600">{a.betterAlternative}</span>
+                         </div>
+                         <p className="text-xs opacity-70">{a.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                <PrimaryButton dark={settings.darkMode} onClick={() => setRoutineAnalysisResult(null)}>Verstanden</PrimaryButton>
+             </div>
+           </div>
         )}
 
         {step === 'care' && (
@@ -537,15 +757,22 @@ const App: React.FC = () => {
                 </div>
 
                 {analysis && (
-                  <AppleCard dark={settings.darkMode} className="!bg-emerald-500/5 !border-emerald-500/20">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-full bg-emerald-500 flex items-center justify-center text-white font-black text-lg shadow-emerald-200 shadow-lg">{analysis.overallScore}</div>
-                      <div>
-                        <h4 className="font-black text-sm">Haut-Zustand</h4>
-                        <p className="text-[10px] font-bold text-emerald-600 uppercase">Gute Stabilität • Dranbleiben</p>
+                  <div className="space-y-6">
+                    <AppleCard dark={settings.darkMode} className="!bg-emerald-500/5 !border-emerald-500/20">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-full bg-emerald-500 flex items-center justify-center text-white font-black text-lg shadow-emerald-200 shadow-lg">{analysis.overallScore}</div>
+                        <div>
+                          <h4 className="font-black text-sm">Haut-Zustand</h4>
+                          <p className="text-[10px] font-bold text-emerald-600 uppercase">Gute Stabilität • Dranbleiben</p>
+                        </div>
                       </div>
+                    </AppleCard>
+                    
+                    {/* RoutineManager Removed from here */}
+                    <div className="p-4 rounded-3xl bg-zinc-100 dark:bg-zinc-800 text-center">
+                        <p className="text-xs font-medium opacity-60">Routine unter "Pflege" verwalten</p>
                     </div>
-                  </AppleCard>
+                  </div>
                 )}
              </div>
            </div>
@@ -569,7 +796,15 @@ const App: React.FC = () => {
             <AppleCard dark={settings.darkMode}>
               <p className="text-sm font-medium leading-relaxed">{scannedProduct.personalReason}</p>
             </AppleCard>
-            <PrimaryButton dark={settings.darkMode} onClick={() => setStep('care')}>Fertig</PrimaryButton>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <SecondaryButton dark={settings.darkMode} onClick={() => setStep('scan_hub')}>Abbrechen</SecondaryButton>
+              <PrimaryButton dark={settings.darkMode} onClick={() => {
+                // If scanned standalone, we ask where to add it
+                setActiveRoutineTime('morning'); // Defaulting for simplicity in this flow, ideally a modal
+                addProductToRoutine(scannedProduct.name, 'morning', scannedProduct.rating, scannedProduct.imageUrl);
+              }}>Hinzufügen</PrimaryButton>
+            </div>
           </div>
         )}
 
@@ -632,30 +867,75 @@ const FeatureTeaser: React.FC<{ icon: React.ReactNode, label: string, dark: bool
   </div>
 );
 
-const RoutineManager: React.FC<{ analysis: SkinAnalysis, dark: boolean }> = ({ analysis, dark }) => (
+const MetricCard: React.FC<{ label: string, value: number, color: string, dark: boolean }> = ({ label, value, color, dark }) => {
+  const getColors = () => {
+    switch(color) {
+      case 'red': return dark ? 'bg-red-900/20 text-red-500' : 'bg-red-50 text-red-600';
+      case 'yellow': return dark ? 'bg-yellow-900/20 text-yellow-500' : 'bg-yellow-50 text-yellow-600';
+      default: return dark ? 'bg-orange-900/20 text-orange-500' : 'bg-orange-50 text-orange-600';
+    }
+  };
+  
+  return (
+    <div className={`p-4 rounded-2xl flex flex-col items-center gap-2 ${getColors()}`}>
+      <span className="text-[9px] font-black uppercase tracking-wider opacity-70">{label}</span>
+      <div className="text-2xl font-black">{Math.round(value)}%</div>
+    </div>
+  );
+};
+
+const RoutineManager: React.FC<{ 
+  analysis: SkinAnalysis, 
+  dark: boolean, 
+  onAdd?: (time: 'morning' | 'evening') => void,
+  onRemove?: (index: number, time: 'morning' | 'evening') => void,
+  onAnalyze?: () => void
+}> = ({ analysis, dark, onAdd, onRemove, onAnalyze }) => (
   <div className="space-y-8">
     <div className="space-y-4">
-      <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-4">Morgen-Routine</h4>
-      {analysis.morningRoutine?.map((s, i) => <RoutineCard key={i} step={s} dark={dark} />)}
+      <div className="flex items-center justify-between ml-4 mr-2">
+        <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Morgen-Routine</h4>
+        {onAdd && <button onClick={() => onAdd('morning')} className="p-1 bg-zinc-100 dark:bg-zinc-800 rounded-full"><Plus className="w-4 h-4" /></button>}
+      </div>
+      {analysis.morningRoutine?.map((s, i) => <RoutineCard key={i} step={s} dark={dark} onDelete={onRemove ? () => onRemove(i, 'morning') : undefined} />)}
     </div>
     <div className="space-y-4">
-      <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-4">Abend-Routine</h4>
-      {analysis.eveningRoutine?.map((s, i) => <RoutineCard key={i} step={s} dark={dark} />)}
+       <div className="flex items-center justify-between ml-4 mr-2">
+        <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Abend-Routine</h4>
+        {onAdd && <button onClick={() => onAdd('evening')} className="p-1 bg-zinc-100 dark:bg-zinc-800 rounded-full"><Plus className="w-4 h-4" /></button>}
+      </div>
+      {analysis.eveningRoutine?.map((s, i) => <RoutineCard key={i} step={s} dark={dark} onDelete={onRemove ? () => onRemove(i, 'evening') : undefined} />)}
     </div>
+    
+    {onAnalyze && (
+      <button 
+        onClick={onAnalyze}
+        className={`w-full py-4 rounded-2xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all ${dark ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-700'}`}
+      >
+        <RefreshCw className="w-4 h-4" />
+        Routine von KI prüfen lassen
+      </button>
+    )}
   </div>
 );
 
-const RoutineCard: React.FC<{ step: RoutineStep, dark: boolean }> = ({ step, dark }) => {
+const RoutineCard: React.FC<{ step: RoutineStep, dark: boolean, onDelete?: () => void }> = ({ step, dark, onDelete }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [imgError, setImgError] = useState(false);
+  const fallbackImg = 'https://images.unsplash.com/photo-1620916566398-39f1143ab7be?auto=format&fit=crop&q=80&w=400';
   
   return (
     <div 
-      onClick={() => setIsExpanded(!isExpanded)}
-      className={`flex flex-col rounded-[32px] overflow-hidden shadow-sm border cursor-pointer active:scale-[0.98] transition-all duration-300 ${dark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-zinc-100'}`}
+      className={`flex flex-col rounded-[32px] overflow-hidden shadow-sm border transition-all duration-300 ${dark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-zinc-100'}`}
     >
-      <div className="flex items-center">
+      <div className="flex items-center cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
         <div className={`w-20 h-20 flex-shrink-0 transition-all ${dark ? 'bg-zinc-800' : 'bg-zinc-50'}`}>
-          <img src={step.imageUrl || 'https://images.unsplash.com/photo-1620916566398-39f1143ab7be?auto=format&fit=crop&q=80&w=400'} className="w-full h-full object-cover" alt="Product" />
+          <img 
+            src={imgError || !step.imageUrl ? fallbackImg : step.imageUrl} 
+            onError={() => setImgError(true)}
+            className="w-full h-full object-cover" 
+            alt="Product" 
+          />
         </div>
         <div className="p-4 flex-1 min-w-0">
           <h5 className="text-sm font-black truncate">{step.product}</h5>
@@ -669,12 +949,17 @@ const RoutineCard: React.FC<{ step: RoutineStep, dark: boolean }> = ({ step, dar
       {isExpanded && (
         <div className={`px-6 pb-6 pt-2 animate-in slide-in-from-top-2 duration-300`}>
            <div className={`h-px w-full mb-4 ${dark ? 'bg-zinc-800' : 'bg-zinc-50'}`}></div>
-           <div className="flex gap-3">
+           <div className="flex gap-3 mb-4">
              <div className="mt-1"><Info className="w-4 h-4 text-zinc-400" /></div>
              <p className={`text-xs font-medium leading-relaxed ${dark ? 'text-zinc-400' : 'text-zinc-600'}`}>
-               {step.reason || "Dieses Produkt wurde speziell basierend auf deiner Hautanalyse ausgewählt, um optimale Ergebnisse zu erzielen."}
+               {step.reason || "Manuell hinzugefügtes Produkt."}
              </p>
            </div>
+           {onDelete && (
+             <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="w-full py-3 rounded-xl bg-red-500/10 text-red-500 text-xs font-bold flex items-center justify-center gap-2">
+               <Trash className="w-3 h-3" /> Aus Routine entfernen
+             </button>
+           )}
         </div>
       )}
     </div>
@@ -733,7 +1018,6 @@ const SettingsItem: React.FC<{ icon: React.ReactNode, label: string, value: bool
   </div>
 );
 
-// Fixed TS error by typing icon as React.ReactElement and providing a generic to cloneElement
 const NavButton: React.FC<{ icon: React.ReactElement, label: string, active: boolean, onClick: () => void, dark: boolean }> = ({ icon, label, active, onClick, dark }) => (
   <button onClick={onClick} className={`flex flex-col items-center gap-1 transition-all flex-1 ${active ? (dark ? 'text-white' : 'text-black') : 'text-zinc-400'}`}>
     <div className={`p-2 rounded-xl transition-colors duration-300 ${active ? (dark ? 'bg-white/10' : 'bg-black/5') : ''}`}>
