@@ -74,12 +74,36 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (settings.isSetupComplete) {
-      const leanAnalysis = analysis ? {
-        ...analysis,
-        // We do NOT remove imageUrls anymore to keep custom added product images if possible
-        // but for huge strings we might need optimization. For now keep it.
-      } : null;
-      localStorage.setItem('glowai_v2_data', JSON.stringify({ settings, analysis: leanAnalysis }));
+      // Deep copy to safe version for storage
+      const leanAnalysis = analysis ? JSON.parse(JSON.stringify(analysis)) : null;
+      
+      if (leanAnalysis) {
+        // Function to strip large base64 images to prevent QuotaExceededError
+        const cleanRoutine = (routine: RoutineStep[]) => {
+          return routine.map(step => {
+            // Keep external URLs (Unsplash), remove generated Base64 Data URLs
+            if (step.imageUrl && step.imageUrl.startsWith('data:')) {
+               return { ...step, imageUrl: undefined };
+            }
+            return step;
+          });
+        };
+
+        if (leanAnalysis.morningRoutine) leanAnalysis.morningRoutine = cleanRoutine(leanAnalysis.morningRoutine);
+        if (leanAnalysis.eveningRoutine) leanAnalysis.eveningRoutine = cleanRoutine(leanAnalysis.eveningRoutine);
+      }
+
+      try {
+        localStorage.setItem('glowai_v2_data', JSON.stringify({ settings, analysis: leanAnalysis }));
+      } catch (e) {
+        console.error("Storage Quota Exceeded. Attempting to save only settings.", e);
+        try {
+           // Fallback: Drop analysis if it's still too big (unlikely after stripping images, but safe)
+           localStorage.setItem('glowai_v2_data', JSON.stringify({ settings, analysis: null }));
+        } catch (e2) {
+           console.error("Critical Storage Failure");
+        }
+      }
     }
   }, [settings, analysis]);
 
@@ -362,6 +386,45 @@ const App: React.FC = () => {
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleReset = () => {
+    if (window.confirm("Möchtest du wirklich alle Daten löschen? Dies kann nicht rückgängig gemacht werden.")) {
+      // 1. Clear Persistence
+      try {
+        localStorage.removeItem('glowai_v2_data');
+      } catch (e) {
+        console.error("Storage clear error", e);
+      }
+
+      // 2. Reset Core State completely to defaults
+      setAnalysis(null);
+      setImages({});
+      setQuiz({
+        age: '', concerns: [], lifestyle: '', sunExposure: '', sensitivity: '', waterIntake: '', sleepHours: ''
+      });
+      setScanIndex(0);
+      setQuizStep(0);
+      setScannedProduct(null);
+      setActiveRoutineTime(null);
+      setProductSearchQuery('');
+      setProductSearchResults([]);
+      setRoutineAnalysisResult(null);
+      
+      // Reset settings to default
+      setSettings({
+        darkMode: false, 
+        notifications: true, 
+        userName: 'Skin AI User', 
+        skinTypeGoal: 'Radiant Skin', 
+        isSetupComplete: false, 
+        points: 0, 
+        streak: 0
+      });
+
+      // 3. Go to Welcome Screen immediately
+      setStep('welcome');
+    }
   };
 
   return (
@@ -858,36 +921,6 @@ const App: React.FC = () => {
            </div>
         )}
 
-        {step === 'product_result' && scannedProduct && (
-          <div className="space-y-8 animate-in slide-in-from-bottom-10">
-            <div className={`relative aspect-square w-full rounded-[48px] overflow-hidden shadow-xl border-4 ${settings.darkMode ? 'border-zinc-800 bg-zinc-900' : 'border-white bg-white'}`}>
-              <img src={scannedProduct.imageUrl} className="w-full h-full object-cover" alt="Product" />
-              <div className={`absolute top-6 right-6 px-5 py-2.5 rounded-3xl flex items-center gap-2 ${settings.darkMode ? 'bg-white text-black' : 'bg-black text-white'}`}>
-                <span className="text-2xl font-black">{scannedProduct.rating}</span>
-                <span className="text-[10px] opacity-60">/10</span>
-              </div>
-            </div>
-            <div className="text-center space-y-2">
-              <h2 className="text-3xl font-black">{scannedProduct.name}</h2>
-              <div className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase inline-block ${scannedProduct.suitability === 'Sehr gut' ? 'bg-green-500 text-white' : 'bg-orange-500 text-white'}`}>
-                {scannedProduct.suitability}
-              </div>
-            </div>
-            <AppleCard dark={settings.darkMode}>
-              <p className="text-sm font-medium leading-relaxed">{scannedProduct.personalReason}</p>
-            </AppleCard>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <SecondaryButton dark={settings.darkMode} onClick={() => setStep('scan_hub')}>Abbrechen</SecondaryButton>
-              <PrimaryButton dark={settings.darkMode} onClick={() => {
-                // If scanned standalone, we ask where to add it
-                setActiveRoutineTime('morning'); // Defaulting for simplicity in this flow, ideally a modal
-                addProductToRoutine(scannedProduct.name, 'morning', scannedProduct.rating, scannedProduct.imageUrl);
-              }}>Hinzufügen</PrimaryButton>
-            </div>
-          </div>
-        )}
-
         {step === 'profile' && (
           <div className="space-y-10 animate-in slide-in-from-right duration-400">
              <div className="flex flex-col items-center pt-6 space-y-4">
@@ -919,7 +952,7 @@ const App: React.FC = () => {
                 </AppleCard>
              </div>
 
-             <SecondaryButton dark={settings.darkMode} onClick={() => { if(confirm("Möchtest du wirklich alle Daten löschen?")) { localStorage.removeItem('glowai_v2_data'); window.location.reload(); } }} className="!text-red-500">Konto zurücksetzen</SecondaryButton>
+             <SecondaryButton dark={settings.darkMode} onClick={handleReset} className="!text-red-500">Konto zurücksetzen</SecondaryButton>
           </div>
         )}
       </div>
